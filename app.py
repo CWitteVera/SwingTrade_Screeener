@@ -47,20 +47,27 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float) -> tuple:
+def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float,
+                         alpaca_api_key: str = None, alpaca_api_secret: str = None, 
+                         alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50) -> tuple:
     """
     Fetch data and apply price filter with caching
     
     Caching Strategy:
-    - Cache key includes: source_name, symbols, min_price, max_price
+    - Cache key includes: source_name, symbols, min_price, max_price, alpaca params
     - TTL: 5 minutes (reduces API calls when only slider moves)
     - When min_price/max_price change, cache is used if same values
+    - Alpaca movers have additional 30-60s internal cache
     
     Args:
         source_name: Name of the data source
         symbols: List of symbols to fetch
         min_price: Minimum price filter
         max_price: Maximum price filter
+        alpaca_api_key: Alpaca API key (optional)
+        alpaca_api_secret: Alpaca API secret (optional)
+        alpaca_movers_type: Type of movers list for Alpaca
+        alpaca_top_n: Number of top movers to fetch
         
     Returns:
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count)
@@ -71,7 +78,12 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     elif source_name == "TradingView (Advanced)":
         source = TradingViewDataSource()
     else:  # Alpaca Movers (Intraday)
-        source = AlpacaDataSource()
+        source = AlpacaDataSource(
+            api_key=alpaca_api_key,
+            api_secret=alpaca_api_secret,
+            movers_type=alpaca_movers_type,
+            top_n=alpaca_top_n
+        )
     
     # Fetch data
     df = source.fetch_data(symbols)
@@ -107,6 +119,60 @@ def main():
             index=0,
             help="Choose the data source for stock prices"
         )
+        
+        # Alpaca-specific configuration (show when Alpaca is selected)
+        alpaca_api_key = None
+        alpaca_api_secret = None
+        alpaca_movers_type = "most_actives"
+        alpaca_top_n = 50
+        
+        if source == "Alpaca Movers (Intraday)":
+            st.markdown("---")
+            st.subheader("Alpaca Configuration")
+            
+            # API credentials (with env var fallback)
+            with st.expander("API Credentials", expanded=False):
+                alpaca_api_key = st.text_input(
+                    "API Key",
+                    type="password",
+                    placeholder="Enter Alpaca API Key or set ALPACA_API_KEY env var",
+                    help="Leave empty to use ALPACA_API_KEY environment variable"
+                )
+                alpaca_api_secret = st.text_input(
+                    "API Secret",
+                    type="password",
+                    placeholder="Enter Alpaca API Secret or set ALPACA_API_SECRET env var",
+                    help="Leave empty to use ALPACA_API_SECRET environment variable"
+                )
+                
+                # Show warning if no credentials provided
+                if not alpaca_api_key and not os.getenv('ALPACA_API_KEY'):
+                    st.warning("⚠️ No API credentials found. Will fall back to Yahoo Finance.")
+            
+            # Movers list type
+            movers_options = {
+                "Most Actives": "most_actives",
+                "Market Movers - Gainers": "gainers", 
+                "Market Movers - Losers": "losers",
+                "Top Volume": "top_volume"
+            }
+            movers_label = st.selectbox(
+                "Movers List",
+                options=list(movers_options.keys()),
+                index=0,
+                help="Select the type of movers list to fetch"
+            )
+            alpaca_movers_type = movers_options[movers_label]
+            
+            # Top N symbols
+            alpaca_top_n = st.slider(
+                "Number of Top Movers",
+                min_value=10,
+                max_value=100,
+                value=50,
+                step=10,
+                help="Limit results to keep UI responsive (capped at 100)"
+            )
         
         st.markdown("---")
         
@@ -187,7 +253,11 @@ def main():
             with st.spinner(f"Fetching data for {len(symbols)} symbols..."):
                 # Fetch and filter data with diagnostic counts
                 results_df, fetched_count, missing_price_count, after_price_filter_count = fetch_and_filter_data(
-                    source, symbols, min_price, max_price
+                    source, symbols, min_price, max_price,
+                    alpaca_api_key=alpaca_api_key,
+                    alpaca_api_secret=alpaca_api_secret,
+                    alpaca_movers_type=alpaca_movers_type,
+                    alpaca_top_n=alpaca_top_n
                 )
                 
                 # Store in session state
@@ -227,6 +297,10 @@ def main():
         # Data source note
         if data_source == "Yahoo (EOD)":
             st.info("📌 **Data source:** Yahoo Finance (EOD/Delayed) - Prices represent end-of-day closing values")
+        elif data_source == "Alpaca Movers (Intraday)":
+            st.info("📌 **Data source:** Alpaca (Intraday Movers) - Real-time movers list with latest tradable prices")
+        elif data_source == "TradingView (Advanced)":
+            st.info("📌 **Data source:** TradingView (Advanced) - Currently using demo data")
         
         st.markdown("---")
         
