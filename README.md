@@ -16,7 +16,7 @@ A modular Streamlit-based stock screener for filtering and analyzing stocks acro
   - Top Volume - Highest volume stocks
 - **Price Range Filter**: Filter stocks by minimum and maximum price
 - **Real-time Results**: View filtered results with price, volume, and change information
-- **Data Caching**: Efficient caching to reduce API calls and improve performance (30-60s for Alpaca movers)
+- **Data Caching**: Efficient caching to reduce API calls and improve performance (45 seconds for Alpaca movers)
 - **Export Capability**: Download results as CSV
 
 ## Installation
@@ -71,7 +71,7 @@ To use the Alpaca Movers (Intraday) data source:
 
 4. **Adjust Settings**:
    - Number of Top Movers: 10-100 (default: 50)
-   - Results are cached for 30-60 seconds to reduce API calls
+   - Results are cached for 45 seconds to reduce API calls
 
 **Note on Fallback**: If Alpaca credentials are not provided or invalid, the application automatically falls back to Yahoo Finance data for the selected universe set.
 
@@ -120,7 +120,7 @@ SwingTrade_Screeener/
 - Yahoo Finance data source is fully functional and fetches real EOD data
 - **Alpaca Movers data source** fetches real-time intraday movers lists (requires API credentials)
   - Supports Most Actives, Market Movers (Gainers/Losers), and Top Volume lists
-  - Caches data for 30-60 seconds to reduce API calls
+  - Caches data for 45 seconds to reduce API calls
   - Automatically falls back to Yahoo Finance if credentials are missing/invalid
 - TradingView data source is a placeholder for future API integration
 - Data is cached for 5 minutes to improve performance and reduce API calls

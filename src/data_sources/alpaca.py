@@ -155,8 +155,8 @@ class AlpacaDataSource(DataSource):
                         # Price Field Mapping from Yahoo to Alpaca:
                         # - Yahoo provides 'Close' and 'Adj Close' fields
                         # - We normalize to 'price' column for pipeline consistency
-                        # - 'Close' = latest intraday/EOD closing price
-                        # - Prefer 'Close' over 'Adj Close' for real-time accuracy
+                        # - 'Close' = latest closing price (EOD for completed sessions)
+                        # - Prefer 'Close' over 'Adj Close' as it reflects actual trading price
                         
                         if 'Close' in hist.columns and pd.notna(hist['Close'].iloc[-1]):
                             current_price = hist['Close'].iloc[-1]
@@ -206,12 +206,12 @@ class AlpacaDataSource(DataSource):
                     change_pct = random.uniform(-25, -5)  # Negative losers
                 elif self.movers_type == "top_volume":
                     change_pct = random.uniform(-10, 10)
-                    volume_multiplier = 3  # Higher volume
                 else:  # most_actives
                     change_pct = random.uniform(-15, 15)
                     
                 base_price = random.uniform(5, 600)
                 change = base_price * (change_pct / 100)
+                # Higher volume for top_volume type
                 volume_mult = 3 if self.movers_type == "top_volume" else 1
                 volume = random.randint(5000000, 100000000) * volume_mult
                 
