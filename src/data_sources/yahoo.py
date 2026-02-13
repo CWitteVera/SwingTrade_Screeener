@@ -50,13 +50,21 @@ class YahooDataSource(DataSource):
         Fetch EOD data from Yahoo Finance
         Falls back to mock data if API is unavailable
         
+        Price Field Choice:
+        - Primary: 'Close' - Latest daily closing price (EOD/delayed)
+        - Fallback: 'Adj Close' - Only if 'Close' is unavailable
+        - Rationale: 'Close' represents actual trading price; 'Adj Close' 
+          adjusts for splits/dividends and may not reflect real-time price
+        
         Args:
             symbols: List of stock symbols
             
         Returns:
             DataFrame with symbol, price, volume, change, change_pct
+            Symbols without valid price data are excluded
         """
         results = []
+        missing_price_count = 0
         api_available = True
         
         for symbol in symbols:
@@ -66,9 +74,18 @@ class YahooDataSource(DataSource):
                 hist = ticker.history(period="1d")
                 
                 if not hist.empty:
-                    current_price = hist['Close'].iloc[-1]
+                    # Prefer 'Close' as canonical price field; fallback to 'Adj Close'
+                    if 'Close' in hist.columns and pd.notna(hist['Close'].iloc[-1]):
+                        current_price = hist['Close'].iloc[-1]
+                    elif 'Adj Close' in hist.columns and pd.notna(hist['Adj Close'].iloc[-1]):
+                        current_price = hist['Adj Close'].iloc[-1]
+                    else:
+                        # No valid price available, skip this symbol
+                        missing_price_count += 1
+                        continue
+                    
                     prev_close = info.get('previousClose', current_price)
-                    volume = hist['Volume'].iloc[-1]
+                    volume = hist['Volume'].iloc[-1] if 'Volume' in hist.columns else 0
                     
                     change = current_price - prev_close
                     change_pct = (change / prev_close * 100) if prev_close else 0
@@ -81,10 +98,10 @@ class YahooDataSource(DataSource):
                         'change_pct': round(change_pct, 2)
                     })
                 else:
-                    api_available = False
-                    break
+                    # No historical data available
+                    missing_price_count += 1
             except Exception:
-                # API likely unavailable
+                # API likely unavailable, switch to mock data
                 api_available = False
                 break
         
@@ -92,4 +109,10 @@ class YahooDataSource(DataSource):
         if not api_available or not results:
             return self._generate_mock_data(symbols)
         
-        return pd.DataFrame(results)
+        df = pd.DataFrame(results)
+        # Store missing price count as metadata
+        # Note: df.attrs is not preserved through DataFrame operations like filtering or copying
+        # Caller should extract this value immediately after fetch
+        df.attrs['missing_price_count'] = missing_price_count
+        
+        return df

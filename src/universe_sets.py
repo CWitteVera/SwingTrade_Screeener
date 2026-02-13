@@ -35,6 +35,9 @@ def get_universe_symbols(universe_set: str, custom_symbols: list = None) -> list
     """
     Get symbols for a specific universe set
     
+    Note: This function returns static lists that don't change frequently.
+    Caching is handled at the app level to avoid recomputation.
+    
     Args:
         universe_set: Name of the universe set
         custom_symbols: List of custom symbols if universe_set is "Custom CSV"

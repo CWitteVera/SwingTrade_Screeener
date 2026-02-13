@@ -31,9 +31,30 @@ def parse_custom_symbols(text: str) -> List[str]:
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float) -> pd.DataFrame:
+def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple = None) -> List[str]:
+    """
+    Cached wrapper for getting universe symbols
+    
+    Args:
+        universe_set: Name of the universe set
+        custom_symbols_tuple: Tuple of custom symbols (tuple is hashable for caching)
+        
+    Returns:
+        List of symbols in the universe
+    """
+    custom_symbols = list(custom_symbols_tuple) if custom_symbols_tuple else None
+    return get_universe_symbols(universe_set, custom_symbols)
+
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float) -> tuple:
     """
     Fetch data and apply price filter with caching
+    
+    Caching Strategy:
+    - Cache key includes: source_name, symbols, min_price, max_price
+    - TTL: 5 minutes (reduces API calls when only slider moves)
+    - When min_price/max_price change, cache is used if same values
     
     Args:
         source_name: Name of the data source
@@ -42,7 +63,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         max_price: Maximum price filter
         
     Returns:
-        Filtered DataFrame
+        Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count)
     """
     # Select data source
     if source_name == "Yahoo (EOD)":
@@ -55,11 +76,18 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     # Fetch data
     df = source.fetch_data(symbols)
     
-    # Apply price filter
+    # Track counts for diagnostics
+    fetched_count = len(df)
+    missing_price_count = df.attrs.get('missing_price_count', 0)
+    
+    # Apply price filter immediately after fetch/normalize
+    # Symbols without valid price have already been dropped in fetch_data
     if not df.empty:
         df = df[(df['price'] >= min_price) & (df['price'] <= max_price)]
     
-    return df
+    after_price_filter_count = len(df)
+    
+    return df, fetched_count, missing_price_count, after_price_filter_count
 
 
 def main():
@@ -137,8 +165,10 @@ def main():
     # Main content area
     st.header("Results")
     
-    # Get symbols for selected universe
-    symbols = get_universe_symbols(universe_set, custom_symbols)
+    # Get symbols for selected universe (with caching)
+    # Convert custom_symbols list to tuple for hashable caching
+    custom_symbols_tuple = tuple(custom_symbols) if custom_symbols else None
+    symbols = get_cached_universe_symbols(universe_set, custom_symbols_tuple)
     
     # Display universe info
     col1, col2, col3 = st.columns(3)
@@ -155,27 +185,60 @@ def main():
             st.warning("⚠️ No symbols to screen. Please select a universe or enter custom symbols.")
         else:
             with st.spinner(f"Fetching data for {len(symbols)} symbols..."):
-                # Fetch and filter data
-                results_df = fetch_and_filter_data(source, symbols, min_price, max_price)
+                # Fetch and filter data with diagnostic counts
+                results_df, fetched_count, missing_price_count, after_price_filter_count = fetch_and_filter_data(
+                    source, symbols, min_price, max_price
+                )
                 
                 # Store in session state
                 st.session_state['results'] = results_df
+                st.session_state['fetched_count'] = fetched_count
+                st.session_state['missing_price_count'] = missing_price_count
+                st.session_state['after_price_filter_count'] = after_price_filter_count
                 st.session_state['filtered_count'] = len(results_df)
+                st.session_state['data_source'] = source
     
     # Display results
     if 'results' in st.session_state:
         results_df = st.session_state['results']
         filtered_count = st.session_state['filtered_count']
+        fetched_count = st.session_state.get('fetched_count', 0)
+        missing_price_count = st.session_state.get('missing_price_count', 0)
+        after_price_filter_count = st.session_state.get('after_price_filter_count', 0)
+        data_source = st.session_state.get('data_source', source)
+        
+        st.markdown("---")
+        
+        # Diagnostic counts: Fetched → After price filter → After all filters
+        st.subheader("📊 Filtering Pipeline")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Requested", len(symbols), help="Total symbols in selected universe")
+        with col2:
+            st.metric("Fetched", fetched_count, help="Symbols with valid price data")
+        with col3:
+            missing_delta = f"-{missing_price_count}" if missing_price_count > 0 else None
+            st.metric("Missing Price", missing_price_count, delta=missing_delta, delta_color="inverse", 
+                     help="Symbols dropped due to missing/invalid price data")
+        with col4:
+            st.metric("After Price Filter", after_price_filter_count, 
+                     help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}")
+        
+        # Data source note
+        if data_source == "Yahoo (EOD)":
+            st.info("📌 **Data source:** Yahoo Finance (EOD/Delayed) - Prices represent end-of-day closing values")
         
         st.markdown("---")
         
         # Results summary
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Matched Symbols", filtered_count)
+            st.metric("Matched Symbols", filtered_count, 
+                     help="Symbols passing all filters (currently only price range)")
         with col2:
             filter_pct = (filtered_count / len(symbols) * 100) if len(symbols) > 0 else 0
-            st.metric("Filter Rate", f"{filter_pct:.1f}%")
+            st.metric("Filter Rate", f"{filter_pct:.1f}%", 
+                     help="Percentage of requested symbols that passed filters")
         
         # Display results table
         if not results_df.empty:
