@@ -21,7 +21,7 @@ class TradingViewDataSource(DataSource):
     
     # Default fields for basic screening (safe defaults)
     DEFAULT_FIELDS = [
-        'name',           # Symbol name
+        'name',           # Ticker symbol
         'close',          # Close/Last price (normalized to 'price')
         'volume',         # Trading volume
         'change',         # Price change ($)
@@ -118,8 +118,8 @@ class TradingViewDataSource(DataSource):
         try:
             from tradingview_screener import Query, Column
             
-            # Build field list
-            all_fields = list(set(self.DEFAULT_FIELDS + self.selected_fields))
+            # Build field list (preserve order, remove duplicates)
+            all_fields = list(dict.fromkeys(self.DEFAULT_FIELDS + self.selected_fields))
             
             # Create query
             query = Query()
@@ -141,7 +141,9 @@ class TradingViewDataSource(DataSource):
             # Convert to DataFrame
             df = pd.DataFrame(data)
             
-            # Check if we got real-time data (rough heuristic: if we got data, assume it's at least delayed)
+            # Note: We set is_realtime flag but this is a placeholder.
+            # Actual real-time status would require checking TradingView's response headers
+            # or data timestamps, which is beyond the scope of basic integration.
             self.is_realtime = len(df) > 0
             
             return df

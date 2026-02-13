@@ -134,7 +134,9 @@ def main():
         tradingview_limit = 500
         
         if source == "TradingView (Advanced)":
-            st.info("ℹ️ **Large field set** (technicals + fundamentals). Real-time may require session cookies.")
+            st.info("ℹ️ **Large field set** (technicals + fundamentals). "
+                   "Real-time data may require session cookies. "
+                   "See [README](https://github.com/CWitteVera/SwingTrade_Screeener#tradingview-advanced-optional) for details.")
             
             st.markdown("---")
             st.subheader("TradingView Configuration")
@@ -401,6 +403,8 @@ def main():
             
             # Define base columns that all sources should have
             base_columns = ['symbol', 'price', 'volume', 'change', 'change_pct']
+            # Define columns with special formatting (not just rounded)
+            special_format_columns = base_columns + ['market_cap_basic', 'name', 'close']
             
             # Format base columns
             if 'price' in display_df.columns:
@@ -420,7 +424,7 @@ def main():
             
             # Keep other numeric columns as-is but round them
             for col in display_df.columns:
-                if col not in base_columns + ['market_cap_basic', 'name'] and display_df[col].dtype in ['float64', 'int64']:
+                if col not in special_format_columns and display_df[col].dtype in ['float64', 'int64']:
                     display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
             
             # Create column name mapping for display
