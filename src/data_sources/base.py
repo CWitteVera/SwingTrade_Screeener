@@ -2,7 +2,7 @@
 Base Data Source Interface
 """
 from abc import ABC, abstractmethod
-from typing import Dict, List
+from typing import List
 import pandas as pd
 
 

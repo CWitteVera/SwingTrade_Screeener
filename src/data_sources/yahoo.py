@@ -83,7 +83,7 @@ class YahooDataSource(DataSource):
                 else:
                     api_available = False
                     break
-            except Exception as e:
+            except Exception:
                 # API likely unavailable
                 api_available = False
                 break

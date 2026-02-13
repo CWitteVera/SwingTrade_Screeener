@@ -124,11 +124,12 @@ def main():
             )
         
         # Price range slider for visual feedback
+        slider_max = min(max_price, 1000.0)
         st.slider(
             "Price Range Visual",
             min_value=0.0,
-            max_value=1000.0,
-            value=(min_price, min(max_price, 1000.0)),
+            max_value=max(slider_max, 100.0),
+            value=(min_price, min(max_price, slider_max)),
             disabled=True,
             help="Visual representation of selected price range"
         )
