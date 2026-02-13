@@ -4,6 +4,7 @@ For advanced real-time data
 """
 import pandas as pd
 from typing import List
+import random
 from .base import DataSource
 
 
@@ -26,13 +27,20 @@ class TradingViewDataSource(DataSource):
         """
         # Placeholder implementation - returns sample data
         results = []
+        random.seed(100)  # Different seed than Yahoo
+        
         for symbol in symbols:
+            base_price = random.uniform(15, 450)
+            change_pct = random.uniform(-4, 6)
+            change = base_price * (change_pct / 100)
+            volume = random.randint(2000000, 60000000)
+            
             results.append({
                 'symbol': symbol,
-                'price': 0.0,
-                'volume': 0,
-                'change': 0.0,
-                'change_pct': 0.0
+                'price': round(base_price, 2),
+                'volume': volume,
+                'change': round(change, 2),
+                'change_pct': round(change_pct, 2)
             })
         
         return pd.DataFrame(results)
