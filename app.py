@@ -233,10 +233,12 @@ def main():
         # Results summary
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Final Matched Symbols", filtered_count)
+            st.metric("Matched Symbols", filtered_count, 
+                     help="Symbols passing all filters (currently only price range)")
         with col2:
             filter_pct = (filtered_count / len(symbols) * 100) if len(symbols) > 0 else 0
-            st.metric("Filter Rate", f"{filter_pct:.1f}%")
+            st.metric("Filter Rate", f"{filter_pct:.1f}%", 
+                     help="Percentage of requested symbols that passed filters")
         
         # Display results table
         if not results_df.empty:

@@ -110,7 +110,9 @@ class YahooDataSource(DataSource):
             return self._generate_mock_data(symbols)
         
         df = pd.DataFrame(results)
-        # Store missing price count as metadata (accessible via df.attrs in Pandas)
+        # Store missing price count as metadata
+        # Note: df.attrs is not preserved through DataFrame operations like filtering or copying
+        # Caller should extract this value immediately after fetch
         df.attrs['missing_price_count'] = missing_price_count
         
         return df
