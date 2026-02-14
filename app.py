@@ -73,10 +73,13 @@ def log_cache_hit(cache_type: str):
     """
     Log a cache hit
     
-    Note: Not actively used with Streamlit's caching since cached functions
-    don't execute on cache hits. Kept for API compatibility.
+    Note: Not actively used because Streamlit's @st.cache_data decorator
+    means cached functions don't execute on cache hits, so we can't log them.
+    This function is kept as a no-op to maintain a consistent API interface
+    with log_cache_miss() in case future enhancements allow cache hit tracking
+    (e.g., if Streamlit adds cache hit callbacks or if we implement custom caching).
     """
-    pass  # Can't track hits with current Streamlit caching
+    pass  # Can't track hits with current Streamlit caching mechanism
 
 def log_cache_miss(cache_type: str):
     """Log a cache miss"""

@@ -247,7 +247,7 @@ Verify that the application handles errors gracefully, provides clear error mess
 2. Select "Yahoo (EOD)", "Leveraged ETFs" universe
 3. Click "Run Screener"
 4. Note API call count (should be 1)
-5. Wait 6+ minutes (cache TTL = 5 minutes)
+5. Wait more than 5 minutes (cache TTL = 5 minutes = 300 seconds)
 6. Click "Run Screener" again (same settings)
 7. Check API call count
 
