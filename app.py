@@ -27,16 +27,8 @@ st.set_page_config(
 
 
 # ============================================================================
-# STATE MANAGEMENT FOR REAL-TIME SCANNING SCALABILITY
+# DEBUG LOG FUNCTIONS FOR DEVELOPER MODE
 # ============================================================================
-# These structures prepare the app for future real-time monitoring features
-# without requiring a rewrite of the core pipeline
-
-# ============================================================================
-# STATE MANAGEMENT FOR REAL-TIME SCANNING SCALABILITY
-# ============================================================================
-# These structures prepare the app for future real-time monitoring features
-# without requiring a rewrite of the core pipeline
 
 def init_debug_log():
     """
