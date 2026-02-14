@@ -4,9 +4,10 @@ A Streamlit app for filtering stocks by price and universe
 """
 import streamlit as st
 import pandas as pd
-from typing import List
+from typing import List, Dict, Optional
 import sys
 import os
+from datetime import datetime, date
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -23,6 +24,111 @@ st.set_page_config(
 )
 
 
+# ============================================================================
+# STATE MANAGEMENT FOR REAL-TIME SCANNING SCALABILITY
+# ============================================================================
+# These structures prepare the app for future real-time monitoring features
+# without requiring a rewrite of the core pipeline
+
+def init_session_state():
+    """
+    Initialize session state for scalable real-time scanning
+    
+    Scalability Pattern:
+    - symbol_directory: Central registry of all symbols across universes
+    - prior_close_cache: Cache of prior closing prices (key: symbol+date)
+    - alert_thresholds: User-defined alert conditions for real-time monitoring
+    - scan_results_history: Rolling buffer of recent scan results
+    
+    These structures enable:
+    1. Incremental updates (only changed symbols)
+    2. Cross-session persistence (Redis/cache layer in production)
+    3. Alert triggering without full rescans
+    4. Historical comparison for trend analysis
+    """
+    if 'symbol_directory' not in st.session_state:
+        # Symbol directory: Maps symbol -> {universe, last_price, last_update}
+        st.session_state['symbol_directory'] = {}
+    
+    if 'prior_close_cache' not in st.session_state:
+        # Prior close cache: Maps (symbol, date) -> close_price
+        # Used for change calculations in real-time scenarios
+        st.session_state['prior_close_cache'] = {}
+    
+    if 'alert_thresholds' not in st.session_state:
+        # Alert thresholds: Maps symbol -> {min_price, max_price, volume_threshold}
+        # Reserved for future real-time alert features
+        st.session_state['alert_thresholds'] = {}
+    
+    if 'scan_results_history' not in st.session_state:
+        # Scan results history: List of (timestamp, results_df) tuples
+        # Limited to last N scans for trend analysis
+        st.session_state['scan_results_history'] = []
+
+
+def update_symbol_directory(symbols: List[str], universe_set: str):
+    """
+    Update symbol directory with current universe
+    
+    Args:
+        symbols: List of symbols in current scan
+        universe_set: Name of the universe set
+    """
+    for symbol in symbols:
+        if symbol not in st.session_state['symbol_directory']:
+            st.session_state['symbol_directory'][symbol] = {
+                'universes': set(),
+                'last_price': None,
+                'last_update': None
+            }
+        st.session_state['symbol_directory'][symbol]['universes'].add(universe_set)
+
+
+def update_prior_close_cache(df: pd.DataFrame, scan_date: date = None):
+    """
+    Update prior close cache with latest prices
+    
+    Args:
+        df: DataFrame with symbol and price columns
+        scan_date: Date of the scan (defaults to today)
+    """
+    if scan_date is None:
+        scan_date = date.today()
+    
+    for _, row in df.iterrows():
+        symbol = row.get('symbol')
+        price = row.get('price')
+        if symbol and price:
+            cache_key = (symbol, scan_date.isoformat())
+            st.session_state['prior_close_cache'][cache_key] = price
+            
+            # Update symbol directory
+            if symbol in st.session_state['symbol_directory']:
+                st.session_state['symbol_directory'][symbol]['last_price'] = price
+                st.session_state['symbol_directory'][symbol]['last_update'] = datetime.now()
+
+
+def add_scan_to_history(results_df: pd.DataFrame, max_history: int = 10):
+    """
+    Add current scan results to history
+    
+    Args:
+        results_df: DataFrame with scan results
+        max_history: Maximum number of scans to keep in history
+    """
+    timestamp = datetime.now()
+    st.session_state['scan_results_history'].append((timestamp, results_df.copy()))
+    
+    # Limit history size
+    if len(st.session_state['scan_results_history']) > max_history:
+        st.session_state['scan_results_history'] = st.session_state['scan_results_history'][-max_history:]
+
+
+# ============================================================================
+# CACHING FUNCTIONS
+# ============================================================================
+
+
 def parse_custom_symbols(text: str) -> List[str]:
     """Parse comma-separated symbols from text input"""
     if not text:
@@ -30,10 +136,16 @@ def parse_custom_symbols(text: str) -> List[str]:
     return [s.strip().upper() for s in text.replace('\n', ',').split(',') if s.strip()]
 
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=3600)  # Cache for 1 hour (long TTL - universe lists change infrequently)
 def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple = None) -> List[str]:
     """
     Cached wrapper for getting universe symbols
+    
+    Caching Strategy:
+    - Universe symbol lists are static and change infrequently
+    - Long TTL (1 hour) to minimize recomputation
+    - Cache key: universe_set + custom_symbols_tuple (hashable)
+    - Separate cache from data fetching to allow independent invalidation
     
     Args:
         universe_set: Name of the universe set
@@ -74,8 +186,10 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         
     Returns:
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
-                  truncated, is_fallback)
+                  truncated, is_fallback, error_info)
     """
+    error_info = None  # Dictionary with provider, error, next_steps
+    
     # Select data source
     if source_name == "Yahoo (EOD)":
         source = YahooDataSource()
@@ -92,8 +206,24 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
             top_n=alpaca_top_n
         )
     
-    # Fetch data
-    df = source.fetch_data(symbols)
+    # Fetch data with error handling
+    try:
+        df = source.fetch_data(symbols)
+    except Exception as e:
+        # Provider failed - set error info for consolidated error panel
+        error_info = {
+            'provider': source_name,
+            'error': str(e),
+            'next_steps': f"The {source_name} data source encountered an error. "
+                         f"Please check your configuration or try a different data source."
+        }
+        # Return empty result with error info
+        df = pd.DataFrame(columns=['symbol', 'price', 'volume', 'change', 'change_pct'])
+        df.attrs['missing_price_count'] = len(symbols)
+        df.attrs['truncated'] = False
+        df.attrs['is_fallback'] = False
+        
+        return df, 0, len(symbols), 0, False, False, error_info
     
     # Track counts and metadata for diagnostics
     fetched_count = len(df)
@@ -103,16 +233,20 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     
     # Apply price filter immediately after fetch/normalize
     # Symbols without valid price have already been dropped in fetch_data
-    if not df.empty:
+    # Validation: Only apply filter if price range is valid
+    if not df.empty and min_price < max_price:
         df = df[(df['price'] >= min_price) & (df['price'] <= max_price)]
     
     after_price_filter_count = len(df)
     
-    return df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback
+    return df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info
 
 
 def main():
     """Main application"""
+    # Initialize session state for scalability
+    init_session_state()
+    
     st.title("📈 SwingTrade Stock Screener")
     st.markdown("---")
     
@@ -279,6 +413,12 @@ def main():
                 step=1.0
             )
         
+        # Validation: Check if price_min >= price_max
+        price_range_valid = min_price < max_price
+        if not price_range_valid:
+            st.warning("⚠️ **Invalid Price Range**: Min price must be less than max price. "
+                      "No price filtering will be applied. Please adjust the range.")
+        
         # Price range slider for visual feedback
         slider_max = min(max_price, 1000.0)
         st.slider(
@@ -297,6 +437,23 @@ def main():
     # Convert custom_symbols list to tuple for hashable caching
     custom_symbols_tuple = tuple(custom_symbols) if custom_symbols else None
     symbols = get_cached_universe_symbols(universe_set, custom_symbols_tuple)
+    
+    # Validation: Check for empty universe
+    if not symbols:
+        st.error("❌ **Empty Universe**: No symbols found in the selected universe set. "
+                "Please select a different universe or enter custom symbols.")
+    
+    # Validation: Check for missing Alpaca API keys
+    alpaca_missing_keys = False
+    if source == "Alpaca Movers (Intraday)":
+        if not alpaca_api_key and not os.getenv('ALPACA_API_KEY'):
+            alpaca_missing_keys = True
+            st.warning("⚠️ **Missing Alpaca API Keys**: No API credentials found. "
+                      "The app will fall back to Yahoo Finance data. "
+                      "To use Alpaca intraday data:\n"
+                      "1. Sign up at [Alpaca Markets](https://alpaca.markets/)\n"
+                      "2. Generate API keys from your dashboard\n"
+                      "3. Enter them in the sidebar or set `ALPACA_API_KEY` and `ALPACA_API_SECRET` environment variables")
     
     # Display universe info
     col1, col2, col3 = st.columns(3)
@@ -317,7 +474,7 @@ def main():
                 # Convert tradingview_fields to tuple for hashable caching
                 tradingview_fields_tuple = tuple(tradingview_fields) if tradingview_fields else ()
                 
-                results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback = fetch_and_filter_data(
+                results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
                     source, symbols, min_price, max_price,
                     alpaca_api_key=alpaca_api_key,
                     alpaca_api_secret=alpaca_api_secret,
@@ -336,6 +493,14 @@ def main():
                 st.session_state['data_source'] = source
                 st.session_state['truncated'] = truncated
                 st.session_state['is_fallback'] = is_fallback
+                st.session_state['error_info'] = error_info
+                st.session_state['price_range_valid'] = price_range_valid
+                
+                # Update scalability structures for future real-time scanning
+                update_symbol_directory(symbols, universe_set)
+                if not results_df.empty:
+                    update_prior_close_cache(results_df)
+                    add_scan_to_history(results_df)
     
     # Display results
     if 'results' in st.session_state:
@@ -347,35 +512,79 @@ def main():
         data_source = st.session_state.get('data_source', source)
         truncated = st.session_state.get('truncated', False)
         is_fallback = st.session_state.get('is_fallback', False)
+        error_info = st.session_state.get('error_info', None)
+        price_range_valid = st.session_state.get('price_range_valid', True)
         
         st.markdown("---")
         
-        # Diagnostic counts: Fetched → After price filter → After all filters
+        # Show error panel if there was an error
+        if error_info:
+            with st.expander("❌ **Data Source Error**", expanded=True):
+                st.error(f"**Provider:** {error_info['provider']}\n\n"
+                        f"**Error:** {error_info['error']}\n\n"
+                        f"**Next Steps:** {error_info['next_steps']}")
+        
+        # Show warning if price range is invalid
+        if not price_range_valid:
+            st.warning("⚠️ **Price filter not applied**: Invalid price range (min >= max). "
+                      "Showing all results with valid prices.")
+        
+        # Diagnostic counts: Total Requested → Fetched → Missing Price → After Price Filter
         st.subheader("📊 Filtering Pipeline")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Requested", len(symbols), help="Total symbols in selected universe")
+            st.metric("Total Requested", len(symbols), help="Total symbols in selected universe")
         with col2:
-            st.metric("Fetched", fetched_count, help="Symbols with valid price data")
+            st.metric("Fetched", fetched_count, help="Symbols successfully fetched from provider")
         with col3:
             missing_delta = f"-{missing_price_count}" if missing_price_count > 0 else None
             st.metric("Missing Price", missing_price_count, delta=missing_delta, delta_color="inverse", 
                      help="Symbols dropped due to missing/invalid price data")
         with col4:
-            st.metric("After Price Filter", after_price_filter_count, 
-                     help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}")
+            if price_range_valid:
+                st.metric("After Price Filter", after_price_filter_count, 
+                         help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}")
+            else:
+                st.metric("After Price Filter", fetched_count - missing_price_count,
+                         help="Price filter not applied (invalid range)")
         
-        # Data source note with fallback indication
+        # Compact Source Badge near the table
         if data_source == "Yahoo (EOD)":
-            st.info("📌 **Data source:** Yahoo Finance (EOD/Delayed) - Prices represent end-of-day closing values")
+            badge_color = "blue"
+            badge_text = "📊 Yahoo Finance (EOD)"
+            badge_help = "End-of-day data from Yahoo Finance (delayed)"
         elif data_source == "Alpaca Movers (Intraday)":
-            st.info("📌 **Data source:** Alpaca (Intraday Movers) - Real-time movers list with latest tradable prices")
+            if is_fallback:
+                badge_color = "orange"
+                badge_text = "⚠️ Alpaca (Fallback to Yahoo)"
+                badge_help = "Alpaca unavailable, using Yahoo Finance as fallback"
+            else:
+                badge_color = "green"
+                badge_text = "✅ Alpaca (Intraday)"
+                badge_help = "Real-time intraday data from Alpaca"
         elif data_source == "TradingView (Advanced)":
             if is_fallback:
-                st.warning("📌 **Data source:** TradingView (Advanced) - Using fallback data (Yahoo Finance). "
-                          "For near real-time TradingView data, session cookies may be required.")
+                badge_color = "orange"
+                badge_text = "⚠️ TradingView (Fallback to Yahoo)"
+                badge_help = "TradingView unavailable, using Yahoo Finance as fallback. Session cookies may be required for real-time data."
             else:
-                st.success("📌 **Data source:** TradingView (Advanced) - Live data with advanced fields")
+                badge_color = "green"
+                badge_text = "✅ TradingView (Advanced)"
+                badge_help = "Advanced data with technical indicators from TradingView"
+        else:
+            badge_color = "gray"
+            badge_text = f"📊 {data_source}"
+            badge_help = "Data source"
+        
+        # Display badge with color coding
+        if badge_color == "blue":
+            st.info(f"**Source:** {badge_text} - {badge_help}")
+        elif badge_color == "green":
+            st.success(f"**Source:** {badge_text} - {badge_help}")
+        elif badge_color == "orange":
+            st.warning(f"**Source:** {badge_text} - {badge_help}")
+        else:
+            st.info(f"**Source:** {badge_text} - {badge_help}")
         
         # Show truncated badge if applicable
         if truncated:

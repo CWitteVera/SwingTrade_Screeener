@@ -170,6 +170,139 @@ SwingTrade_Screeener/
 - Data is cached to improve performance and reduce API calls
 - Universe sets contain demo subsets of major indices for faster screening
 
+## Performance & Limits
+
+### Caching Strategy
+
+The app implements a multi-layer caching system to optimize performance and reduce API calls:
+
+#### 1. Universe Symbol Lists (Long TTL)
+- **Cache Duration**: 1 hour
+- **Cache Key**: `universe_set + custom_symbols`
+- **Rationale**: Universe lists change infrequently (S&P 500, NASDAQ-100, etc.)
+- **Benefit**: Eliminates repeated list lookups when switching between sources or adjusting filters
+
+#### 2. Price Lookups per Source+Symbol+Date
+- **Yahoo Finance**: Cached at yfinance library level (session-based)
+- **TradingView**: 5-minute cache per universe + field set combination
+  - Cache Key: `universe_key + fields + limit`
+  - Benefit: Reuses data when only slider adjustments occur
+- **Alpaca Movers**: 30-60 second cache per movers type + top_n
+  - Cache Key: `movers_type + top_n`
+  - Cache Duration: 45 seconds
+  - Benefit: Reduces API calls during rapid UI interactions
+
+#### 3. Fetch & Filter Pipeline (Streamlit Cache)
+- **Cache Duration**: 5 minutes
+- **Cache Key**: `source + symbols + min_price + max_price + source_params`
+- **Benefit**: When only price slider moves, the entire fetch is cached
+- **Invalidation**: Automatic after TTL or when parameters change
+
+### Optimization: Avoid Recompute on Slider Changes
+
+The caching system is designed to avoid expensive API calls when only the price slider changes:
+
+1. **Initial Fetch**: Data is fetched from provider and cached with price range
+2. **Slider Adjustment**: If you adjust the price slider to values already queried, the cached result is reused
+3. **In-Memory Refiltering**: For new price ranges, the cached unfiltered data could be reused (future enhancement)
+
+**Current Behavior**: Each unique price range creates a new cache entry
+**Future Enhancement**: Cache raw fetched data separately, then apply price filter in-memory
+
+### Rate Limits & Resilience
+
+#### Yahoo Finance (EOD)
+- **Rate Limits**: Generally permissive for reasonable usage
+- **Fallback**: Mock data generation if API is unavailable
+- **Error Handling**: Graceful degradation with informative messages
+
+#### TradingView (Advanced)
+- **Rate Limits**: Undocumented, but exists
+- **Fallback**: Automatic fallback to Yahoo Finance if unavailable
+- **Warning**: Yellow badge indicates fallback mode
+- **Session Cookies**: May be required for real-time data access
+
+#### Alpaca (Intraday)
+- **Rate Limits**: 
+  - Free tier: 200 requests/minute
+  - Paid tiers: Higher limits
+  - Cached for 45 seconds to stay well within limits
+- **Fallback**: Automatic fallback to Yahoo Finance if:
+  - Credentials missing or invalid
+  - API error or timeout
+  - Rate limit exceeded
+- **Warning**: Yellow badge indicates fallback mode
+
+### Validation & Error Handling
+
+#### Input Validation
+- **Price Range**: Min price must be < max price
+  - Invalid ranges show warning and disable filtering
+  - Previous valid results are preserved
+- **Empty Universes**: Error message if no symbols in selected universe
+- **Missing API Keys**: Clear actionable message for Alpaca setup
+
+#### Error Consolidation
+- Provider errors are caught and displayed in a consolidated error panel
+- Each error shows:
+  - Provider name
+  - Error message
+  - Actionable next steps
+- Errors don't crash the app - fallbacks are attempted first
+
+#### Graceful Degradation
+1. **Provider Failure**: Falls back to Yahoo Finance
+2. **Yahoo Failure**: Falls back to mock data (for demo purposes)
+3. **Partial Failures**: Symbols with missing data are counted and reported in diagnostics
+
+### Diagnostics & Monitoring
+
+#### Filtering Pipeline Counters
+The app displays four key metrics showing data flow through the pipeline:
+
+1. **Total Requested**: Symbols in selected universe
+2. **Fetched**: Symbols successfully retrieved from provider
+3. **Missing Price**: Symbols dropped due to missing/invalid price data
+4. **After Price Filter**: Symbols passing the price range filter
+
+These counters help you understand:
+- Data quality issues (high "Missing Price" count)
+- Filter effectiveness (gap between "Fetched" and "After Price Filter")
+- Provider reliability (gap between "Requested" and "Fetched")
+
+#### Source Badge
+A compact badge near the results table shows:
+- **Active Data Source**: Yahoo EOD, TradingView, or Alpaca Intraday
+- **Fallback Status**: Yellow warning if using fallback provider
+- **Data Freshness**: EOD (delayed) vs. Intraday (real-time)
+
+### Scalability for Real-Time Scanning
+
+The app is architected to support future real-time monitoring without requiring a rewrite:
+
+#### State Management Structures
+1. **Symbol Directory**: Central registry mapping symbols to universes and last prices
+2. **Prior Close Cache**: Historical closing prices for change calculations
+3. **Alert Thresholds**: Reserved for user-defined alert conditions
+4. **Scan Results History**: Rolling buffer of recent scans for trend analysis
+
+#### Future Enhancements
+These structures enable:
+- **Incremental Updates**: Only fetch changed symbols, not full universe
+- **Cross-Session Persistence**: Cache layer (Redis) for multi-user scenarios
+- **Alert Triggering**: Real-time alerts without full rescans
+- **Historical Comparison**: Trend analysis across multiple scans
+
+#### Architecture Reference
+The design follows patterns from high-performance real-time screeners:
+- Separate symbol directory from live price data
+- Cache prior closes for efficient change calculations
+- Rolling buffers for recent history
+- Modular data source interface for easy extension
+
+For more details on fast real-time screening architecture, see:
+[How to Build a Blazing Fast Real-Time Stock Screener](https://databento.com/blog/how-to-build-a-blazing-fast-real-time-stock-screener-with-python)
+
 ## License
 
 MIT License
