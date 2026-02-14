@@ -39,9 +39,7 @@ def init_debug_log():
             'enabled': False,
             'entries': [],
             'cache_stats': {
-                'universe_hits': 0,
                 'universe_misses': 0,
-                'fetch_hits': 0,
                 'fetch_misses': 0
             },
             'api_calls': {
@@ -72,10 +70,13 @@ def log_debug(category: str, message: str, data: Dict = None):
         st.session_state['debug_log']['entries'].append(entry)
 
 def log_cache_hit(cache_type: str):
-    """Log a cache hit"""
-    if st.session_state.get('debug_log', {}).get('enabled', False):
-        st.session_state['debug_log']['cache_stats'][f'{cache_type}_hits'] += 1
-        log_debug('cache', f'Cache HIT: {cache_type}')
+    """
+    Log a cache hit
+    
+    Note: Not actively used with Streamlit's caching since cached functions
+    don't execute on cache hits. Kept for API compatibility.
+    """
+    pass  # Can't track hits with current Streamlit caching
 
 def log_cache_miss(cache_type: str):
     """Log a cache miss"""
@@ -112,9 +113,7 @@ def clear_debug_log():
     if 'debug_log' in st.session_state:
         st.session_state['debug_log']['entries'] = []
         st.session_state['debug_log']['cache_stats'] = {
-            'universe_hits': 0,
             'universe_misses': 0,
-            'fetch_hits': 0,
             'fetch_misses': 0
         }
         st.session_state['debug_log']['api_calls'] = {
@@ -245,6 +244,9 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
     - Cache key: universe_set + custom_symbols_tuple (hashable)
     - Separate cache from data fetching to allow independent invalidation
     
+    Note: Cache logging happens outside this function since cached functions
+    don't execute on cache hits.
+    
     Args:
         universe_set: Name of the universe set
         custom_symbols_tuple: Tuple of custom symbols (tuple is hashable for caching)
@@ -252,11 +254,12 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
     Returns:
         List of symbols in the universe
     """
-    # This will be a cache miss on first call, hit on subsequent calls
-    log_cache_miss('universe')  # Logged when function actually executes
+    # If this executes, it's a cache miss
+    log_cache_miss('universe')
+    
     custom_symbols = list(custom_symbols_tuple) if custom_symbols_tuple else None
     result = get_universe_symbols(universe_set, custom_symbols)
-    log_debug('info', f'Fetched universe symbols: {universe_set}', {
+    log_debug('info', f'Fetched universe symbols (cache miss): {universe_set}', {
         'universe': universe_set,
         'symbol_count': len(result),
         'symbols': result
@@ -278,6 +281,9 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     - When min_price/max_price change, cache is used if same values
     - TradingView and Alpaca have additional internal caching
     
+    Note: Cache logging happens inside this function. When cached, function doesn't execute,
+    so cache misses are logged when function runs, but cache hits aren't tracked.
+    
     Args:
         source_name: Name of the data source
         symbols: List of symbols to fetch
@@ -294,7 +300,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
                   truncated, is_fallback, error_info)
     """
-    # Log cache miss - if this function executes, cache was missed
+    # If this executes, it's a cache miss
     log_cache_miss('fetch')
     
     # Start timing
@@ -302,7 +308,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     
     error_info = None  # Dictionary with provider, error, next_steps
     
-    log_debug('info', f'Fetching data from {source_name}', {
+    log_debug('info', f'Fetching data from {source_name} (cache miss)', {
         'source': source_name,
         'symbol_count': len(symbols),
         'symbols': symbols,
@@ -879,25 +885,24 @@ def main():
             
             # Detailed sections
             tab1, tab2, tab3, tab4, tab5 = st.tabs([
-                "📊 Cache Stats", "⏱️ Timings", "🌐 API Calls", "❌ Errors", "📝 Full Log"
+                "📊 Cache Misses", "⏱️ Timings", "🌐 API Calls", "❌ Errors", "📝 Full Log"
             ])
             
             with tab1:
-                st.subheader("Cache Hit/Miss Statistics")
+                st.subheader("Cache Statistics")
+                st.info("**Note:** Due to Streamlit's caching mechanism, only cache misses are logged. "
+                       "Cache hits occur when cached functions don't execute, so they're not counted. "
+                       "The absence of new misses indicates cache hits are occurring.")
                 cache_df = pd.DataFrame([
                     {
                         'Cache Type': 'Universe',
-                        'Hits': cache_stats['universe_hits'],
                         'Misses': cache_stats['universe_misses'],
-                        'Hit Rate': f"{cache_stats['universe_hits'] / (cache_stats['universe_hits'] + cache_stats['universe_misses']) * 100:.1f}%" 
-                            if (cache_stats['universe_hits'] + cache_stats['universe_misses']) > 0 else "N/A"
+                        'Note': 'Function executes on miss'
                     },
                     {
                         'Cache Type': 'Fetch',
-                        'Hits': cache_stats['fetch_hits'],
                         'Misses': cache_stats['fetch_misses'],
-                        'Hit Rate': f"{cache_stats['fetch_hits'] / (cache_stats['fetch_hits'] + cache_stats['fetch_misses']) * 100:.1f}%" 
-                            if (cache_stats['fetch_hits'] + cache_stats['fetch_misses']) > 0 else "N/A"
+                        'Note': 'Function executes on miss'
                     }
                 ])
                 st.dataframe(cache_df, use_container_width=True, hide_index=True)

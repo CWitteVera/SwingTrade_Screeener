@@ -151,21 +151,25 @@ Verify that all universe selection options work correctly and return expected sy
 
 ### Steps:
 1. Enable Developer Mode in sidebar
-2. Select "S&P 500" universe
-3. Click "Run Screener"
-4. Check Debug Log → Cache Stats tab
-5. Note universe cache misses
-6. Click "Run Screener" again without changing universe
-7. Check Cache Stats again
+2. Clear Debug Log
+3. Select "S&P 500" universe
+4. Click "Run Screener"
+5. Check Debug Log → Cache Misses tab
+6. Note universe cache misses (should be 1)
+7. Click "Run Screener" again without changing universe (within 1 hour)
+8. Check Cache Misses tab again
 
 ### Expected Results:
-- First run: Universe cache miss = 1
-- Second run: Universe cache hit should increase (or remain same if cache expired)
+- First run: Universe cache miss = 1 (function executes)
+- Second run (within 1 hour): Universe cache miss remains 1 (function doesn't execute - cache hit occurred but not logged)
 - Cache TTL is 1 hour (3600 seconds)
+- No new cache miss count means cache hit occurred
 
 ### Pass Criteria:
 - ✅ Cache miss recorded on first fetch
-- ✅ Cache behavior consistent with TTL
+- ✅ No new cache miss on second fetch (indicates cache hit)
+
+**Note:** Streamlit's caching mechanism means cache hits can't be explicitly logged. When a cache hit occurs, the cached function doesn't execute at all. The absence of new cache misses indicates successful cache hits.
 
 ---
 

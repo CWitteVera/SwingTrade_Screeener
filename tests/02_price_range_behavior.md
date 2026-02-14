@@ -161,23 +161,26 @@ Verify that price range filtering works correctly across different scenarios, in
 
 ### Steps:
 1. Enable Developer Mode
-2. Select "Leveraged ETFs" universe
-3. Set price range $0 - $1000
-4. Click "Run Screener"
-5. Check Debug Log → Cache Stats (note fetch cache misses)
-6. Adjust price range to $40 - $60 (without changing other settings)
-7. Click "Run Screener" again
-8. Check Cache Stats again
+2. Clear Debug Log
+3. Select "Leveraged ETFs" universe
+4. Set price range $0 - $1000
+5. Click "Run Screener"
+6. Check Debug Log → Cache Misses (note fetch cache misses = 1)
+7. Adjust price range to $40 - $60 (without changing other settings)
+8. Click "Run Screener" again
+9. Check Cache Misses again
 
 ### Expected Results:
-- First run: Fetch cache miss = 1
-- Second run: Fetch cache may hit or miss depending on TTL (5 minutes)
-- If within 5 minutes, fetch should use cache
-- Price filtering should be reapplied to cached data
+- First run: Fetch cache miss = 1 (function executes)
+- Second run: Fetch cache miss = 2 (new cache miss because price range changed)
+- Each unique price range creates new cache entry
+- If you run with same price range again (within 5 min), no new cache miss
 
 ### Pass Criteria:
-- ✅ Cache behavior consistent with TTL
-- ✅ Price filtering applied correctly to cached data
+- ✅ Cache miss increments when price range changes
+- ✅ Cache reused when running with same settings within TTL
+
+**Note:** Streamlit's caching uses all function parameters as cache key. Changing price range creates a new cache entry.
 
 ---
 
