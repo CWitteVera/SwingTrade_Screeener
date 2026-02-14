@@ -8,6 +8,8 @@ from typing import List, Dict, Optional
 import sys
 import os
 from datetime import datetime, date
+import time
+import traceback
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
@@ -30,6 +32,107 @@ st.set_page_config(
 # These structures prepare the app for future real-time monitoring features
 # without requiring a rewrite of the core pipeline
 
+# ============================================================================
+# STATE MANAGEMENT FOR REAL-TIME SCANNING SCALABILITY
+# ============================================================================
+# These structures prepare the app for future real-time monitoring features
+# without requiring a rewrite of the core pipeline
+
+def init_debug_log():
+    """
+    Initialize debug log structure for Developer Mode
+    """
+    if 'debug_log' not in st.session_state:
+        st.session_state['debug_log'] = {
+            'enabled': False,
+            'entries': [],
+            'cache_stats': {
+                'universe_hits': 0,
+                'universe_misses': 0,
+                'fetch_hits': 0,
+                'fetch_misses': 0
+            },
+            'api_calls': {
+                'yahoo': 0,
+                'tradingview': 0,
+                'alpaca': 0
+            },
+            'timings': {},
+            'errors': []
+        }
+
+def log_debug(category: str, message: str, data: Dict = None):
+    """
+    Add entry to debug log
+    
+    Args:
+        category: Category of log entry (info, cache, timing, api, error)
+        message: Log message
+        data: Optional dictionary of additional data
+    """
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'category': category,
+            'message': message,
+            'data': data or {}
+        }
+        st.session_state['debug_log']['entries'].append(entry)
+
+def log_cache_hit(cache_type: str):
+    """Log a cache hit"""
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        st.session_state['debug_log']['cache_stats'][f'{cache_type}_hits'] += 1
+        log_debug('cache', f'Cache HIT: {cache_type}')
+
+def log_cache_miss(cache_type: str):
+    """Log a cache miss"""
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        st.session_state['debug_log']['cache_stats'][f'{cache_type}_misses'] += 1
+        log_debug('cache', f'Cache MISS: {cache_type}')
+
+def log_api_call(provider: str):
+    """Log an API call"""
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        st.session_state['debug_log']['api_calls'][provider] += 1
+        log_debug('api', f'API call to {provider}')
+
+def log_timing(step: str, duration: float):
+    """Log timing for a step"""
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        st.session_state['debug_log']['timings'][step] = duration
+        log_debug('timing', f'{step}: {duration:.3f}s')
+
+def log_error(error: Exception, context: str):
+    """Log an error with full traceback"""
+    if st.session_state.get('debug_log', {}).get('enabled', False):
+        error_info = {
+            'context': context,
+            'error_type': type(error).__name__,
+            'error_message': str(error),
+            'traceback': traceback.format_exc()
+        }
+        st.session_state['debug_log']['errors'].append(error_info)
+        log_debug('error', f'Error in {context}: {str(error)}', error_info)
+
+def clear_debug_log():
+    """Clear all debug log entries"""
+    if 'debug_log' in st.session_state:
+        st.session_state['debug_log']['entries'] = []
+        st.session_state['debug_log']['cache_stats'] = {
+            'universe_hits': 0,
+            'universe_misses': 0,
+            'fetch_hits': 0,
+            'fetch_misses': 0
+        }
+        st.session_state['debug_log']['api_calls'] = {
+            'yahoo': 0,
+            'tradingview': 0,
+            'alpaca': 0
+        }
+        st.session_state['debug_log']['timings'] = {}
+        st.session_state['debug_log']['errors'] = []
+
 def init_session_state():
     """
     Initialize session state for scalable real-time scanning
@@ -46,6 +149,9 @@ def init_session_state():
     3. Alert triggering without full rescans
     4. Historical comparison for trend analysis
     """
+    # Initialize debug log
+    init_debug_log()
+    
     if 'symbol_directory' not in st.session_state:
         # Symbol directory: Maps symbol -> {universe, last_price, last_update}
         st.session_state['symbol_directory'] = {}
@@ -154,8 +260,16 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
     Returns:
         List of symbols in the universe
     """
+    # This will be a cache miss on first call, hit on subsequent calls
+    log_cache_miss('universe')  # Logged when function actually executes
     custom_symbols = list(custom_symbols_tuple) if custom_symbols_tuple else None
-    return get_universe_symbols(universe_set, custom_symbols)
+    result = get_universe_symbols(universe_set, custom_symbols)
+    log_debug('info', f'Fetched universe symbols: {universe_set}', {
+        'universe': universe_set,
+        'symbol_count': len(result),
+        'symbols': result
+    })
+    return result
 
 
 @st.cache_data(ttl=300)  # Cache for 5 minutes
@@ -188,9 +302,23 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
                   truncated, is_fallback, error_info)
     """
+    # Log cache miss - if this function executes, cache was missed
+    log_cache_miss('fetch')
+    
+    # Start timing
+    start_time = time.time()
+    
     error_info = None  # Dictionary with provider, error, next_steps
     
+    log_debug('info', f'Fetching data from {source_name}', {
+        'source': source_name,
+        'symbol_count': len(symbols),
+        'symbols': symbols,
+        'price_range': {'min': min_price, 'max': max_price}
+    })
+    
     # Select data source
+    source_selection_start = time.time()
     if source_name == "Yahoo (EOD)":
         source = YahooDataSource()
     elif source_name == "TradingView (Advanced)":
@@ -205,11 +333,21 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
             movers_type=alpaca_movers_type,
             top_n=alpaca_top_n
         )
+    log_timing('source_selection', time.time() - source_selection_start)
     
     # Fetch data with error handling
+    fetch_start = time.time()
     try:
+        # Log API call
+        provider_key = source_name.split()[0].lower()
+        if provider_key not in ['yahoo', 'tradingview', 'alpaca']:
+            provider_key = 'yahoo'
+        log_api_call(provider_key)
+        
         df = source.fetch_data(symbols)
+        log_timing('data_fetch', time.time() - fetch_start)
     except Exception as e:
+        log_error(e, f'fetch_data from {source_name}')
         # Provider failed - set error info for consolidated error panel
         error_info = {
             'provider': source_name,
@@ -223,6 +361,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         df.attrs['truncated'] = False
         df.attrs['is_fallback'] = False
         
+        log_timing('total_fetch_and_filter', time.time() - start_time)
         return df, 0, len(symbols), 0, False, False, error_info
     
     # Track counts and metadata for diagnostics
@@ -231,13 +370,29 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     truncated = df.attrs.get('truncated', False)
     is_fallback = df.attrs.get('is_fallback', False)
     
+    log_debug('info', f'Fetched {fetched_count} symbols, {missing_price_count} missing prices', {
+        'fetched': fetched_count,
+        'missing_prices': missing_price_count,
+        'truncated': truncated,
+        'is_fallback': is_fallback
+    })
+    
     # Apply price filter immediately after fetch/normalize
     # Symbols without valid price have already been dropped in fetch_data
     # Validation: Only apply filter if price range is valid
+    filter_start = time.time()
     if not df.empty and min_price < max_price:
         df = df[(df['price'] >= min_price) & (df['price'] <= max_price)]
+    log_timing('price_filter', time.time() - filter_start)
     
     after_price_filter_count = len(df)
+    
+    log_debug('info', f'After price filter: {after_price_filter_count} symbols', {
+        'after_filter': after_price_filter_count,
+        'filtered_out': fetched_count - missing_price_count - after_price_filter_count
+    })
+    
+    log_timing('total_fetch_and_filter', time.time() - start_time)
     
     return df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info
 
@@ -253,6 +408,22 @@ def main():
     # Sidebar for filters
     with st.sidebar:
         st.header("Filters")
+        
+        # Developer Mode Toggle
+        st.markdown("---")
+        st.subheader("🔧 Developer Mode")
+        developer_mode = st.checkbox(
+            "Enable Debug Log",
+            value=st.session_state.get('debug_log', {}).get('enabled', False),
+            help="Show detailed debug information including cache hits/misses, timing, API calls, and error traces"
+        )
+        st.session_state['debug_log']['enabled'] = developer_mode
+        
+        if developer_mode and st.button("Clear Debug Log", help="Clear all debug log entries"):
+            clear_debug_log()
+            st.success("Debug log cleared!")
+        
+        st.markdown("---")
         
         # Universe Source
         st.subheader("Universe Source")
@@ -691,6 +862,117 @@ def main():
             )
         else:
             st.info("No stocks match the current filter criteria.")
+        
+        # Developer Mode: Debug Log Display
+        if st.session_state.get('debug_log', {}).get('enabled', False):
+            st.markdown("---")
+            st.subheader("🔧 Debug Log")
+            
+            debug_log = st.session_state['debug_log']
+            
+            # Summary metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                cache_stats = debug_log['cache_stats']
+                total_cache = sum(cache_stats.values())
+                st.metric("Total Cache Operations", total_cache)
+            with col2:
+                api_stats = debug_log['api_calls']
+                total_api = sum(api_stats.values())
+                st.metric("Total API Calls", total_api)
+            with col3:
+                st.metric("Log Entries", len(debug_log['entries']))
+            with col4:
+                st.metric("Errors", len(debug_log['errors']))
+            
+            # Detailed sections
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📊 Cache Stats", "⏱️ Timings", "🌐 API Calls", "❌ Errors", "📝 Full Log"
+            ])
+            
+            with tab1:
+                st.subheader("Cache Hit/Miss Statistics")
+                cache_df = pd.DataFrame([
+                    {
+                        'Cache Type': 'Universe',
+                        'Hits': cache_stats['universe_hits'],
+                        'Misses': cache_stats['universe_misses'],
+                        'Hit Rate': f"{cache_stats['universe_hits'] / (cache_stats['universe_hits'] + cache_stats['universe_misses']) * 100:.1f}%" 
+                            if (cache_stats['universe_hits'] + cache_stats['universe_misses']) > 0 else "N/A"
+                    },
+                    {
+                        'Cache Type': 'Fetch',
+                        'Hits': cache_stats['fetch_hits'],
+                        'Misses': cache_stats['fetch_misses'],
+                        'Hit Rate': f"{cache_stats['fetch_hits'] / (cache_stats['fetch_hits'] + cache_stats['fetch_misses']) * 100:.1f}%" 
+                            if (cache_stats['fetch_hits'] + cache_stats['fetch_misses']) > 0 else "N/A"
+                    }
+                ])
+                st.dataframe(cache_df, use_container_width=True, hide_index=True)
+            
+            with tab2:
+                st.subheader("Operation Timings")
+                if debug_log['timings']:
+                    timing_df = pd.DataFrame([
+                        {'Operation': k, 'Duration (s)': f"{v:.3f}"}
+                        for k, v in debug_log['timings'].items()
+                    ])
+                    st.dataframe(timing_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No timing data available. Run the screener to see timings.")
+            
+            with tab3:
+                st.subheader("API Call Counts")
+                api_df = pd.DataFrame([
+                    {'Provider': k.capitalize(), 'Call Count': v}
+                    for k, v in api_stats.items() if v > 0
+                ])
+                if not api_df.empty:
+                    st.dataframe(api_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No API calls made yet. Run the screener to see API call statistics.")
+            
+            with tab4:
+                st.subheader("Error Traces")
+                if debug_log['errors']:
+                    for i, error in enumerate(debug_log['errors'], 1):
+                        with st.expander(f"Error {i}: {error['error_type']} in {error['context']}", expanded=False):
+                            st.error(f"**Error Type:** {error['error_type']}")
+                            st.text(f"Message: {error['error_message']}")
+                            st.text("Traceback:")
+                            st.code(error['traceback'], language='python')
+                else:
+                    st.success("No errors encountered!")
+            
+            with tab5:
+                st.subheader("Full Debug Log")
+                if debug_log['entries']:
+                    # Create DataFrame for display
+                    log_df = pd.DataFrame([
+                        {
+                            'Timestamp': entry['timestamp'],
+                            'Category': entry['category'].upper(),
+                            'Message': entry['message']
+                        }
+                        for entry in debug_log['entries']
+                    ])
+                    st.dataframe(log_df, use_container_width=True, hide_index=True)
+                    
+                    # Export debug log as CSV
+                    debug_csv = log_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Debug Log (CSV)",
+                        data=debug_csv,
+                        file_name=f"debug_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+                    
+                    # Show detailed entries with expandable data
+                    with st.expander("View Detailed Log Entries", expanded=False):
+                        for entry in debug_log['entries']:
+                            st.json(entry)
+                else:
+                    st.info("No log entries yet. Run the screener to see debug information.")
     else:
         st.info("👆 Click 'Run Screener' to fetch and filter stocks.")
 
