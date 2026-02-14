@@ -187,7 +187,7 @@ The app implements a multi-layer caching system to optimize performance and redu
 - **TradingView**: 5-minute cache per universe + field set combination
   - Cache Key: `universe_key + fields + limit`
   - Benefit: Reuses data when only slider adjustments occur
-- **Alpaca Movers**: 30-60 second cache per movers type + top_n
+- **Alpaca Movers**: 45-second cache per movers type + top_n
   - Cache Key: `movers_type + top_n`
   - Cache Duration: 45 seconds
   - Benefit: Reduces API calls during rapid UI interactions

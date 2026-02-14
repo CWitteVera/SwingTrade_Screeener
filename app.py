@@ -446,7 +446,8 @@ def main():
     # Validation: Check for missing Alpaca API keys
     alpaca_missing_keys = False
     if source == "Alpaca Movers (Intraday)":
-        if not alpaca_api_key and not os.getenv('ALPACA_API_KEY'):
+        if (not alpaca_api_key and not os.getenv('ALPACA_API_KEY')) or \
+           (not alpaca_api_secret and not os.getenv('ALPACA_API_SECRET')):
             alpaca_missing_keys = True
             st.warning("⚠️ **Missing Alpaca API Keys**: No API credentials found. "
                       "The app will fall back to Yahoo Finance data. "
@@ -541,12 +542,9 @@ def main():
             st.metric("Missing Price", missing_price_count, delta=missing_delta, delta_color="inverse", 
                      help="Symbols dropped due to missing/invalid price data")
         with col4:
-            if price_range_valid:
-                st.metric("After Price Filter", after_price_filter_count, 
-                         help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}")
-            else:
-                st.metric("After Price Filter", fetched_count - missing_price_count,
-                         help="Price filter not applied (invalid range)")
+            st.metric("After Price Filter", after_price_filter_count, 
+                     help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}" if price_range_valid 
+                          else "Price filter not applied (invalid range)")
         
         # Compact Source Badge near the table
         if data_source == "Yahoo (EOD)":
