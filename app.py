@@ -49,15 +49,16 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float,
                          alpaca_api_key: str = None, alpaca_api_secret: str = None, 
-                         alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50) -> tuple:
+                         alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50,
+                         tradingview_fields: tuple = (), tradingview_limit: int = 500) -> tuple:
     """
     Fetch data and apply price filter with caching
     
     Caching Strategy:
-    - Cache key includes: source_name, symbols, min_price, max_price, alpaca params
+    - Cache key includes: source_name, symbols, min_price, max_price, source-specific params
     - TTL: 5 minutes (reduces API calls when only slider moves)
     - When min_price/max_price change, cache is used if same values
-    - Alpaca movers have additional 30-60s internal cache
+    - TradingView and Alpaca have additional internal caching
     
     Args:
         source_name: Name of the data source
@@ -68,15 +69,21 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         alpaca_api_secret: Alpaca API secret (optional)
         alpaca_movers_type: Type of movers list for Alpaca
         alpaca_top_n: Number of top movers to fetch
+        tradingview_fields: Tuple of additional fields for TradingView (tuple for hashable caching)
+        tradingview_limit: Result limit for TradingView
         
     Returns:
-        Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count)
+        Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
+                  truncated, is_fallback)
     """
     # Select data source
     if source_name == "Yahoo (EOD)":
         source = YahooDataSource()
     elif source_name == "TradingView (Advanced)":
-        source = TradingViewDataSource()
+        source = TradingViewDataSource(
+            selected_fields=list(tradingview_fields),
+            limit=tradingview_limit
+        )
     else:  # Alpaca Movers (Intraday)
         source = AlpacaDataSource(
             api_key=alpaca_api_key,
@@ -88,9 +95,11 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     # Fetch data
     df = source.fetch_data(symbols)
     
-    # Track counts for diagnostics
+    # Track counts and metadata for diagnostics
     fetched_count = len(df)
     missing_price_count = df.attrs.get('missing_price_count', 0)
+    truncated = df.attrs.get('truncated', False)
+    is_fallback = df.attrs.get('is_fallback', False)
     
     # Apply price filter immediately after fetch/normalize
     # Symbols without valid price have already been dropped in fetch_data
@@ -99,7 +108,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     
     after_price_filter_count = len(df)
     
-    return df, fetched_count, missing_price_count, after_price_filter_count
+    return df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback
 
 
 def main():
@@ -119,6 +128,59 @@ def main():
             index=0,
             help="Choose the data source for stock prices"
         )
+        
+        # TradingView-specific configuration (show when TradingView is selected)
+        tradingview_fields = []
+        tradingview_limit = 500
+        
+        if source == "TradingView (Advanced)":
+            st.info("ℹ️ **Large field set** (technicals + fundamentals). "
+                   "Real-time data may require session cookies. "
+                   "See [README](https://github.com/CWitteVera/SwingTrade_Screeener#tradingview-advanced-optional) for details.")
+            
+            st.markdown("---")
+            st.subheader("TradingView Configuration")
+            
+            # Field selector with safe defaults
+            with st.expander("Advanced Fields (Optional)", expanded=False):
+                st.markdown("Select additional technical/fundamental fields beyond defaults (close, volume, change, market_cap_basic):")
+                
+                # Group fields by category for better UX
+                st.markdown("**Technical Indicators:**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.checkbox("Relative Volume (10d)", key="tv_relvol"):
+                        tradingview_fields.append("relative_volume_10d_calc")
+                    if st.checkbox("RSI", key="tv_rsi"):
+                        tradingview_fields.append("RSI")
+                    if st.checkbox("MACD", key="tv_macd"):
+                        tradingview_fields.extend(["MACD.macd", "MACD.signal"])
+                with col2:
+                    if st.checkbox("Stochastic", key="tv_stoch"):
+                        tradingview_fields.extend(["Stoch.K", "Stoch.D"])
+                    if st.checkbox("Bollinger Bands", key="tv_bb"):
+                        tradingview_fields.extend(["BB.upper", "BB.lower"])
+                    if st.checkbox("VWAP", key="tv_vwap"):
+                        tradingview_fields.append("VWAP")
+                
+                st.markdown("**Moving Averages:**")
+                ema_options = st.multiselect(
+                    "EMA Periods",
+                    options=["5", "10", "20", "50"],
+                    help="Select exponential moving average periods"
+                )
+                for period in ema_options:
+                    tradingview_fields.append(f"EMA{period}")
+            
+            # Result limit
+            tradingview_limit = st.slider(
+                "Result Limit",
+                min_value=50,
+                max_value=500,
+                value=500,
+                step=50,
+                help="Cap results to keep UI responsive (max: 500)"
+            )
         
         # Alpaca-specific configuration (show when Alpaca is selected)
         alpaca_api_key = None
@@ -252,12 +314,17 @@ def main():
         else:
             with st.spinner(f"Fetching data for {len(symbols)} symbols..."):
                 # Fetch and filter data with diagnostic counts
-                results_df, fetched_count, missing_price_count, after_price_filter_count = fetch_and_filter_data(
+                # Convert tradingview_fields to tuple for hashable caching
+                tradingview_fields_tuple = tuple(tradingview_fields) if tradingview_fields else ()
+                
+                results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback = fetch_and_filter_data(
                     source, symbols, min_price, max_price,
                     alpaca_api_key=alpaca_api_key,
                     alpaca_api_secret=alpaca_api_secret,
                     alpaca_movers_type=alpaca_movers_type,
-                    alpaca_top_n=alpaca_top_n
+                    alpaca_top_n=alpaca_top_n,
+                    tradingview_fields=tradingview_fields_tuple,
+                    tradingview_limit=tradingview_limit
                 )
                 
                 # Store in session state
@@ -267,6 +334,8 @@ def main():
                 st.session_state['after_price_filter_count'] = after_price_filter_count
                 st.session_state['filtered_count'] = len(results_df)
                 st.session_state['data_source'] = source
+                st.session_state['truncated'] = truncated
+                st.session_state['is_fallback'] = is_fallback
     
     # Display results
     if 'results' in st.session_state:
@@ -276,6 +345,8 @@ def main():
         missing_price_count = st.session_state.get('missing_price_count', 0)
         after_price_filter_count = st.session_state.get('after_price_filter_count', 0)
         data_source = st.session_state.get('data_source', source)
+        truncated = st.session_state.get('truncated', False)
+        is_fallback = st.session_state.get('is_fallback', False)
         
         st.markdown("---")
         
@@ -294,13 +365,22 @@ def main():
             st.metric("After Price Filter", after_price_filter_count, 
                      help=f"Symbols within price range ${min_price:.2f} - ${max_price:.2f}")
         
-        # Data source note
+        # Data source note with fallback indication
         if data_source == "Yahoo (EOD)":
             st.info("📌 **Data source:** Yahoo Finance (EOD/Delayed) - Prices represent end-of-day closing values")
         elif data_source == "Alpaca Movers (Intraday)":
             st.info("📌 **Data source:** Alpaca (Intraday Movers) - Real-time movers list with latest tradable prices")
         elif data_source == "TradingView (Advanced)":
-            st.info("📌 **Data source:** TradingView (Advanced) - Currently using demo data")
+            if is_fallback:
+                st.warning("📌 **Data source:** TradingView (Advanced) - Using fallback data (Yahoo Finance). "
+                          "For near real-time TradingView data, session cookies may be required.")
+            else:
+                st.success("📌 **Data source:** TradingView (Advanced) - Live data with advanced fields")
+        
+        # Show truncated badge if applicable
+        if truncated:
+            st.warning("⚠️ **Results truncated:** Showing top results (limit reached). "
+                      "Adjust the Result Limit slider or refine filters to see more.")
         
         st.markdown("---")
         
@@ -320,13 +400,73 @@ def main():
             
             # Format the dataframe for display
             display_df = results_df.copy()
-            display_df['price'] = display_df['price'].apply(lambda x: f"${x:,.2f}")
-            display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
-            display_df['change'] = display_df['change'].apply(lambda x: f"${x:,.2f}")
-            display_df['change_pct'] = display_df['change_pct'].apply(lambda x: f"{x:+.2f}%")
             
-            # Rename columns for display
-            display_df.columns = ['Symbol', 'Price', 'Volume', 'Change ($)', 'Change (%)']
+            # Define base columns that all sources should have
+            base_columns = ['symbol', 'price', 'volume', 'change', 'change_pct']
+            # Define columns with special formatting (not just rounded)
+            special_format_columns = base_columns + ['market_cap_basic', 'name', 'close']
+            
+            # Format base columns
+            if 'price' in display_df.columns:
+                display_df['price'] = display_df['price'].apply(lambda x: f"${x:,.2f}")
+            if 'volume' in display_df.columns:
+                display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
+            if 'change' in display_df.columns:
+                display_df['change'] = display_df['change'].apply(lambda x: f"${x:,.2f}")
+            if 'change_pct' in display_df.columns:
+                display_df['change_pct'] = display_df['change_pct'].apply(lambda x: f"{x:+.2f}%")
+            
+            # Format advanced columns if present (from TradingView)
+            if 'market_cap_basic' in display_df.columns:
+                display_df['market_cap_basic'] = display_df['market_cap_basic'].apply(
+                    lambda x: f"${x/1e9:,.2f}B" if pd.notna(x) else "N/A"
+                )
+            
+            # Keep other numeric columns as-is but round them
+            for col in display_df.columns:
+                if col not in special_format_columns and display_df[col].dtype in ['float64', 'int64']:
+                    display_df[col] = display_df[col].apply(lambda x: f"{x:.2f}" if pd.notna(x) else "N/A")
+            
+            # Create column name mapping for display
+            column_mapping = {
+                'symbol': 'Symbol',
+                'name': 'Name',
+                'price': 'Price',
+                'volume': 'Volume',
+                'change': 'Change ($)',
+                'change_pct': 'Change (%)',
+                'market_cap_basic': 'Market Cap',
+                'relative_volume_10d_calc': 'Rel Vol (10d)',
+                'RSI': 'RSI',
+                'MACD.macd': 'MACD',
+                'MACD.signal': 'MACD Signal',
+                'Stoch.K': 'Stoch K',
+                'Stoch.D': 'Stoch D',
+                'BB.upper': 'BB Upper',
+                'BB.lower': 'BB Lower',
+                'VWAP': 'VWAP',
+                'EMA5': 'EMA 5',
+                'EMA10': 'EMA 10',
+                'EMA20': 'EMA 20',
+                'EMA50': 'EMA 50',
+            }
+            
+            # Rename columns that exist in the dataframe
+            rename_dict = {col: column_mapping.get(col, col) for col in display_df.columns}
+            display_df = display_df.rename(columns=rename_dict)
+            
+            # Reorder columns: base columns first, then advanced columns
+            ordered_cols = []
+            for col in ['Symbol', 'Name', 'Price', 'Volume', 'Change ($)', 'Change (%)', 'Market Cap']:
+                if col in display_df.columns:
+                    ordered_cols.append(col)
+            
+            # Add remaining columns (advanced fields) to the right
+            for col in display_df.columns:
+                if col not in ordered_cols:
+                    ordered_cols.append(col)
+            
+            display_df = display_df[ordered_cols]
             
             st.dataframe(
                 display_df,
