@@ -51,9 +51,38 @@ def init_debug_log():
             'errors': []
         }
 
+def redact_sensitive_data(data: Dict) -> Dict:
+    """
+    Redact sensitive information from debug log data
+    
+    Args:
+        data: Dictionary that may contain sensitive information
+        
+    Returns:
+        Dictionary with sensitive values redacted
+    """
+    if not data:
+        return data
+    
+    sensitive_keys = ['api_key', 'api_secret', 'key', 'secret', 'password', 'token', 
+                     'FINANCIALDATA_API_KEY', 'ALPACA_API_KEY', 'ALPACA_API_SECRET']
+    
+    redacted = data.copy()
+    for key, value in redacted.items():
+        # Check if key name contains sensitive keywords
+        if any(sensitive in key.lower() for sensitive in ['key', 'secret', 'password', 'token']):
+            if isinstance(value, str) and len(value) > 0:
+                # Show first 4 chars, redact the rest
+                redacted[key] = value[:4] + '*' * (len(value) - 4) if len(value) > 4 else '****'
+        # Check if value is a dict and recursively redact
+        elif isinstance(value, dict):
+            redacted[key] = redact_sensitive_data(value)
+    
+    return redacted
+
 def log_debug(category: str, message: str, data: Dict = None):
     """
-    Add entry to debug log
+    Add entry to debug log with automatic redaction of sensitive data
     
     Args:
         category: Category of log entry (info, cache, timing, api, error)
@@ -61,11 +90,14 @@ def log_debug(category: str, message: str, data: Dict = None):
         data: Optional dictionary of additional data
     """
     if st.session_state.get('debug_log', {}).get('enabled', False):
+        # Redact sensitive data before logging
+        safe_data = redact_sensitive_data(data) if data else {}
+        
         entry = {
             'timestamp': datetime.now().isoformat(),
             'category': category,
             'message': message,
-            'data': data or {}
+            'data': safe_data
         }
         st.session_state['debug_log']['entries'].append(entry)
 
@@ -411,6 +443,22 @@ def main():
     # Sidebar for filters
     with st.sidebar:
         st.header("Filters")
+        
+        # Settings section
+        with st.expander("⚙️ Settings", expanded=False):
+            st.markdown("**API Configuration**")
+            st.info("Set `FINANCIALDATA_API_KEY` to enable Advanced Data:\n\n"
+                   "• Environment variable\n"
+                   "• `.streamlit/secrets.toml`\n"
+                   "• `.env` file\n\n"
+                   "Get your key from [FinancialData.Net](https://financialdata.net/)")
+            
+            st.markdown("**Alpaca Configuration**")
+            st.info("Set `ALPACA_API_KEY` and `ALPACA_API_SECRET` to enable Alpaca Movers:\n\n"
+                   "• Environment variables\n"
+                   "• UI input (below)\n"
+                   "• `.env` file\n\n"
+                   "Get your keys from [Alpaca Markets](https://alpaca.markets/)")
         
         # Developer Mode Toggle
         st.markdown("---")

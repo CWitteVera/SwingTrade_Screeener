@@ -7,7 +7,7 @@ A modular Streamlit-based stock screener for filtering and analyzing stocks acro
 - **Multiple Universe Sets**: Screen stocks from S&P 500, NASDAQ-100, All NMS stocks, Leveraged ETFs, or custom symbol lists
 - **Multiple Data Sources**: 
   - Yahoo Finance (EOD data) - End-of-day data with basic fields
-  - **TradingView (Advanced)** - 3,000+ fields including technicals and fundamentals
+  - **Advanced Data (financialdata.net)** - Comprehensive market data with prices, fundamentals, and technical indicators
   - **Alpaca Movers (Intraday)** - Real-time movers lists with intraday data
 - **Alpaca Movers Lists**:
   - Most Actives - Top stocks by trading activity
@@ -16,7 +16,7 @@ A modular Streamlit-based stock screener for filtering and analyzing stocks acro
   - Top Volume - Highest volume stocks
 - **Price Range Filter**: Filter stocks by minimum and maximum price
 - **Real-time Results**: View filtered results with price, volume, and change information
-- **Data Caching**: Efficient caching to reduce API calls and improve performance (45 seconds for Alpaca movers)
+- **Data Caching**: Efficient caching to reduce API calls and improve performance
 - **Export Capability**: Download results as CSV
 
 ## Installation
@@ -32,6 +32,12 @@ cd SwingTrade_Screeener
 pip install -r requirements.txt
 ```
 
+3. Set up environment variables (optional):
+```bash
+cp .env.example .env
+# Edit .env and add your API keys
+```
+
 ## Usage
 
 Run the Streamlit application:
@@ -40,6 +46,48 @@ streamlit run app.py
 ```
 
 The application will open in your browser at `http://localhost:8501`
+
+### Advanced Data (financialdata.net) Setup
+
+To use the Advanced Data source with comprehensive market data:
+
+1. **Get Your API Key**:
+   - Sign up at [FinancialData.Net](https://financialdata.net/)
+   - Navigate to your account dashboard
+   - Generate an API key
+
+2. **Configure API Key**:
+
+   **Option A: Environment Variable (Recommended)**
+   ```bash
+   export FINANCIALDATA_API_KEY="your_api_key_here"
+   ```
+
+   **Option B: Streamlit Secrets**
+   Create `.streamlit/secrets.toml`:
+   ```toml
+   FINANCIALDATA_API_KEY = "your_api_key_here"
+   ```
+
+   **Option C: .env File**
+   ```bash
+   echo "FINANCIALDATA_API_KEY=your_api_key_here" > .env
+   ```
+
+3. **Features**:
+   - **Real-time Quotes**: Current stock prices and market data
+   - **Technical Indicators**: RSI, MACD, SMA 50/150/200, EMA 5/10/20/50, Relative Volume
+   - **Fundamentals**: Market Cap, P/E Ratio, EPS, Revenue, Profit Margin
+   - **Multiple Timeframes**: Daily (1d), Hourly (1h), 5-minute (5m)
+   - **Smart Caching**: 5-minute cache reduces API calls
+
+4. **Field Selection**:
+   - **Default Fields**: Symbol, Price, Volume, Market Cap
+   - **Optional Technical Indicators**: Relative Volume (10d), RSI, MACD, SMA 50/150/200
+   - **Optional Moving Averages**: EMA 5, 10, 20, 50 periods
+   - **Optional Fundamentals**: P/E Ratio, EPS
+
+**Note on Fallback**: If the API key is not provided or invalid, the application automatically falls back to Yahoo Finance data with a warning message.
 
 ### Alpaca API Setup (Optional)
 
@@ -81,41 +129,22 @@ To use the Alpaca Movers (Intraday) data source:
 - Consider using Paper Trading API for development/testing
 - See [Alpaca API Documentation](https://alpaca.markets/docs/api-references/market-data-api/) for current limits
 
-### TradingView Advanced (Optional)
+## Migration Notes
 
-To use the TradingView (Advanced) data source with 3,000+ fields:
+### TradingView Source Removed
 
-1. **Features**:
-   - **Large Field Set**: Access to technicals (RSI, MACD, Bollinger Bands, etc.) and fundamentals (market cap, volume, etc.)
-   - **Advanced Filters**: Select from 13+ technical indicators and moving averages
-   - **Result Limiting**: Cap at 500 results (adjustable) to keep UI responsive
-   - **Smart Caching**: 5-minute cache reduces API calls when adjusting filters
+The TradingView (Advanced) data source has been removed and replaced with **Advanced Data (financialdata.net)**. 
 
-2. **Field Selection**:
-   - **Default Fields** (always included): Symbol, Price (close), Volume, Change, Change %, Market Cap
-   - **Optional Technical Indicators**: RSI, MACD, Stochastic, Bollinger Bands, VWAP, Relative Volume
-   - **Optional Moving Averages**: EMA 5, 10, 20, 50 periods
+**What changed:**
+- TradingView integration has been completely removed
+- New Advanced Data (financialdata.net) provider offers similar functionality with better reliability
+- API key is now required for advanced features (free tier available)
 
-3. **Authentication & Data Access**:
-   - **Delayed Data**: Works out-of-the-box with public TradingView data
-   - **Real-time Data**: May require session cookies from TradingView
-   - **Fallback**: Automatically falls back to Yahoo Finance if TradingView is unavailable
-   - The app will display a warning badge if using fallback data
-
-4. **Usage Tips**:
-   - Start with default fields to test connectivity
-   - Add advanced fields only when needed to minimize data transfer
-   - Use Result Limit slider to control response size
-   - Watch for "Results truncated" badge if limit is reached
-   - Data is cached for 5 minutes based on universe + field combination
-
-5. **Rate Limits & Performance**:
-   - TradingView has rate limits on scanner API calls
-   - Caching strategy reduces repeated API calls
-   - Result limit (default: 500) keeps UI responsive
-   - Consider filtering by universe set before applying technical filters
-
-**Note on Data Quality**: TradingView provides comprehensive data but may require authentication for real-time access. The app will automatically fall back to Yahoo Finance (delayed data) if TradingView is unavailable or requires authentication.
+**If you were using TradingView:**
+1. Switch to "Advanced Data (financialdata.net)" in the data source selector
+2. Get a free API key from [FinancialData.Net](https://financialdata.net/)
+3. Configure the API key using one of the methods above
+4. Select the same technical indicators and fundamentals you were using before
 
 ## Project Structure
 
