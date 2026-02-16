@@ -306,8 +306,15 @@ class FinancialDataNetSource(DataSource):
         Returns:
             DataFrame with normalized columns
         """
+        # Check if API is available, otherwise fallback to Yahoo
         if not self.is_available():
-            return pd.DataFrame()
+            # Import here to avoid circular dependency
+            from .yahoo import YahooDataSource
+            yahoo_source = YahooDataSource()
+            df = yahoo_source.fetch_data(symbols)
+            # Mark as fallback
+            df.attrs['is_fallback'] = True
+            return df
         
         # Fetch quotes as the primary data source
         df = self.get_quotes(symbols)
@@ -323,5 +330,8 @@ class FinancialDataNetSource(DataSource):
         # Add symbol column if missing
         if not df.empty and 'symbol' not in df.columns:
             df['symbol'] = symbols[0] if len(symbols) == 1 else None
+        
+        # Mark as not a fallback
+        df.attrs['is_fallback'] = False
         
         return df
