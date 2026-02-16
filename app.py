@@ -551,17 +551,6 @@ def main():
                 help="Select timeframe for OHLCV data"
             )
         
-        # TradingView-specific configuration (REMOVED - kept for backwards compatibility during migration)
-        tradingview_fields = []
-        tradingview_limit = 500
-        
-        if source == "TradingView (Advanced)":
-            # This branch should never execute as TradingView is removed from options
-            # Kept for error handling if old session state exists
-            st.error("❌ **TradingView source has been removed.** Please use 'Advanced Data (financialdata.net)' instead.")
-            st.info("**Migration Note**: TradingView integration has been replaced with FinancialData.Net. "
-                   "See README for details on the new Advanced Data provider.")
-        
         # Alpaca-specific configuration (show when Alpaca is selected)
         alpaca_api_key = None
         alpaca_api_secret = None
@@ -815,11 +804,6 @@ def main():
                 badge_color = "green"
                 badge_text = "✅ FinancialData.Net"
                 badge_help = "Advanced data with prices, fundamentals, and technicals from FinancialData.Net"
-        elif data_source == "TradingView (Advanced)":
-            # Legacy support - should not be reachable
-            badge_color = "orange"
-            badge_text = "⚠️ TradingView (Deprecated)"
-            badge_help = "TradingView has been removed. Please use Advanced Data (financialdata.net) instead."
         else:
             badge_color = "gray"
             badge_text = f"📊 {data_source}"

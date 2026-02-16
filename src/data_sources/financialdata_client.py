@@ -6,7 +6,11 @@ import pandas as pd
 from typing import List, Optional, Dict, Any
 import os
 import streamlit as st
+import logging
 from .base import DataSource
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 try:
     from fdnpy import FinancialDataClient as FDNClient
@@ -14,6 +18,7 @@ try:
 except ImportError:
     HAS_SDK = False
     FDNClient = None
+    logger.warning("fdnpy SDK not available. Install with: pip install fdnpy")
 
 
 class FinancialDataNetSource(DataSource):
@@ -71,7 +76,11 @@ class FinancialDataNetSource(DataSource):
         self.client = None
         
         if self.api_key and HAS_SDK:
-            self.client = FDNClient(api_key=self.api_key)
+            try:
+                self.client = FDNClient(api_key=self.api_key)
+            except Exception as e:
+                logger.error(f"Failed to initialize FinancialData.Net client: {e}")
+                self.client = None
     
     def _get_api_key(self) -> Optional[str]:
         """
@@ -125,16 +134,21 @@ class FinancialDataNetSource(DataSource):
                 # Default to stock symbols
                 symbols_data = self.client.get_stock_symbols()
             
+            # Check if data was returned
+            if not symbols_data or not isinstance(symbols_data, list):
+                logger.warning(f"No data returned for universe: {set_name}")
+                return []
+            
             # Extract symbols from response
             symbols = [item.get('trading_symbol', '').upper() 
-                      for item in symbols_data if item.get('trading_symbol')]
+                      for item in symbols_data if item and item.get('trading_symbol')]
             
             # Apply limit and offset
             return symbols[offset:offset + limit]
             
         except Exception as e:
             # Log error and return empty list
-            print(f"Error fetching universe from financialdata.net: {e}")
+            logger.error(f"Error fetching universe from financialdata.net: {e}")
             return []
     
     def get_quotes(self, symbols: List[str]) -> pd.DataFrame:
@@ -175,7 +189,7 @@ class FinancialDataNetSource(DataSource):
             return pd.DataFrame(records)
             
         except Exception as e:
-            print(f"Error fetching quotes from financialdata.net: {e}")
+            logger.error(f"Error fetching quotes from financialdata.net: {e}")
             return pd.DataFrame()
     
     def get_ohlcv(self, symbols: List[str], interval: str = '1d', 
@@ -225,7 +239,7 @@ class FinancialDataNetSource(DataSource):
                 result[symbol] = df
                 
             except Exception as e:
-                print(f"Error fetching OHLCV for {symbol}: {e}")
+                logger.error(f"Error fetching OHLCV for {symbol}: {e}")
                 continue
         
         return result
@@ -270,7 +284,7 @@ class FinancialDataNetSource(DataSource):
                 records.append(record)
                 
             except Exception as e:
-                print(f"Error fetching fundamentals for {symbol}: {e}")
+                logger.error(f"Error fetching fundamentals for {symbol}: {e}")
                 continue
         
         return pd.DataFrame(records)
