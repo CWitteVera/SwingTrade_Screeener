@@ -3,4 +3,4 @@ pandas>=2.0.0
 yfinance>=0.2.32
 requests>=2.31.0
 alpaca-py>=0.8.2
-tradingview-screener>=3.0.0
+fdnpy>=0.1.0
