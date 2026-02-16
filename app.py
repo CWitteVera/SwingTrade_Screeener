@@ -15,7 +15,7 @@ import traceback
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from universe_sets import get_universe_symbols
-from data_sources import YahooDataSource, TradingViewDataSource, AlpacaDataSource
+from data_sources import YahooDataSource, AlpacaDataSource, FinancialDataNetSource
 
 
 # Page configuration
@@ -44,16 +44,45 @@ def init_debug_log():
             },
             'api_calls': {
                 'yahoo': 0,
-                'tradingview': 0,
+                'financialdata': 0,
                 'alpaca': 0
             },
             'timings': {},
             'errors': []
         }
 
+def redact_sensitive_data(data: Dict) -> Dict:
+    """
+    Redact sensitive information from debug log data
+    
+    Args:
+        data: Dictionary that may contain sensitive information
+        
+    Returns:
+        Dictionary with sensitive values redacted
+    """
+    if not data:
+        return data
+    
+    sensitive_keys = ['api_key', 'api_secret', 'key', 'secret', 'password', 'token', 
+                     'FINANCIALDATA_API_KEY', 'ALPACA_API_KEY', 'ALPACA_API_SECRET']
+    
+    redacted = data.copy()
+    for key, value in redacted.items():
+        # Check if key name contains sensitive keywords
+        if any(sensitive in key.lower() for sensitive in ['key', 'secret', 'password', 'token']):
+            if isinstance(value, str) and len(value) > 0:
+                # Show first 4 chars, redact the rest
+                redacted[key] = value[:4] + '*' * (len(value) - 4) if len(value) > 4 else '****'
+        # Check if value is a dict and recursively redact
+        elif isinstance(value, dict):
+            redacted[key] = redact_sensitive_data(value)
+    
+    return redacted
+
 def log_debug(category: str, message: str, data: Dict = None):
     """
-    Add entry to debug log
+    Add entry to debug log with automatic redaction of sensitive data
     
     Args:
         category: Category of log entry (info, cache, timing, api, error)
@@ -61,11 +90,14 @@ def log_debug(category: str, message: str, data: Dict = None):
         data: Optional dictionary of additional data
     """
     if st.session_state.get('debug_log', {}).get('enabled', False):
+        # Redact sensitive data before logging
+        safe_data = redact_sensitive_data(data) if data else {}
+        
         entry = {
             'timestamp': datetime.now().isoformat(),
             'category': category,
             'message': message,
-            'data': data or {}
+            'data': safe_data
         }
         st.session_state['debug_log']['entries'].append(entry)
 
@@ -274,7 +306,7 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
 def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float,
                          alpaca_api_key: str = None, alpaca_api_secret: str = None, 
                          alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50,
-                         tradingview_fields: tuple = (), tradingview_limit: int = 500) -> tuple:
+                         financialdata_fields: tuple = (), financialdata_interval: str = '1d') -> tuple:
     """
     Fetch data and apply price filter with caching
     
@@ -282,7 +314,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     - Cache key includes: source_name, symbols, min_price, max_price, source-specific params
     - TTL: 5 minutes (reduces API calls when only slider moves)
     - When min_price/max_price change, cache is used if same values
-    - TradingView and Alpaca have additional internal caching
+    - FinancialData.Net and Alpaca have additional internal caching
     
     Note: Cache logging happens inside this function. When cached, function doesn't execute,
     so cache misses are logged when function runs, but cache hits aren't tracked.
@@ -296,8 +328,8 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         alpaca_api_secret: Alpaca API secret (optional)
         alpaca_movers_type: Type of movers list for Alpaca
         alpaca_top_n: Number of top movers to fetch
-        tradingview_fields: Tuple of additional fields for TradingView (tuple for hashable caching)
-        tradingview_limit: Result limit for TradingView
+        financialdata_fields: Tuple of additional fields for FinancialData.Net (tuple for hashable caching)
+        financialdata_interval: Timeframe for FinancialData.Net data
         
     Returns:
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
@@ -322,10 +354,10 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     source_selection_start = time.time()
     if source_name == "Yahoo (EOD)":
         source = YahooDataSource()
-    elif source_name == "TradingView (Advanced)":
-        source = TradingViewDataSource(
-            selected_fields=list(tradingview_fields),
-            limit=tradingview_limit
+    elif source_name == "Advanced Data (financialdata.net)":
+        source = FinancialDataNetSource(
+            selected_fields=list(financialdata_fields),
+            interval=financialdata_interval
         )
     else:  # Alpaca Movers (Intraday)
         source = AlpacaDataSource(
@@ -341,7 +373,9 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     try:
         # Log API call
         provider_key = source_name.split()[0].lower()
-        if provider_key not in ['yahoo', 'tradingview', 'alpaca']:
+        if provider_key == 'advanced':
+            provider_key = 'financialdata'
+        elif provider_key not in ['yahoo', 'alpaca']:
             provider_key = 'yahoo'
         log_api_call(provider_key)
         
@@ -410,6 +444,22 @@ def main():
     with st.sidebar:
         st.header("Filters")
         
+        # Settings section
+        with st.expander("⚙️ Settings", expanded=False):
+            st.markdown("**API Configuration**")
+            st.info("Set `FINANCIALDATA_API_KEY` to enable Advanced Data:\n\n"
+                   "• Environment variable\n"
+                   "• `.streamlit/secrets.toml`\n"
+                   "• `.env` file\n\n"
+                   "Get your key from [FinancialData.Net](https://financialdata.net/)")
+            
+            st.markdown("**Alpaca Configuration**")
+            st.info("Set `ALPACA_API_KEY` and `ALPACA_API_SECRET` to enable Alpaca Movers:\n\n"
+                   "• Environment variables\n"
+                   "• UI input (below)\n"
+                   "• `.env` file\n\n"
+                   "Get your keys from [Alpaca Markets](https://alpaca.markets/)")
+        
         # Developer Mode Toggle
         st.markdown("---")
         st.subheader("🔧 Developer Mode")
@@ -430,44 +480,53 @@ def main():
         st.subheader("Universe Source")
         source = st.radio(
             "Select data source:",
-            ["Yahoo (EOD)", "TradingView (Advanced)", "Alpaca Movers (Intraday)"],
+            ["Yahoo (EOD)", "Advanced Data (financialdata.net)", "Alpaca Movers (Intraday)"],
             index=0,
             help="Choose the data source for stock prices"
         )
         
-        # TradingView-specific configuration (show when TradingView is selected)
-        tradingview_fields = []
-        tradingview_limit = 500
+        # FinancialData.Net-specific configuration
+        financialdata_fields = []
+        financialdata_interval = '1d'
         
-        if source == "TradingView (Advanced)":
-            st.info("ℹ️ **Large field set** (technicals + fundamentals). "
-                   "Real-time data may require session cookies. "
-                   "See [README](https://github.com/CWitteVera/SwingTrade_Screeener#tradingview-advanced-optional) for details.")
+        if source == "Advanced Data (financialdata.net)":
+            # Check if API key is available
+            fdn_source = FinancialDataNetSource()
+            if not fdn_source.is_available():
+                st.warning("⚠️ **Missing FinancialData.Net API Key**: No API key found. "
+                          "The app will fall back to Yahoo Finance data. "
+                          "To use Advanced Data:\n"
+                          "1. Get your API key from [FinancialData.Net](https://financialdata.net/)\n"
+                          "2. Set `FINANCIALDATA_API_KEY` in environment or `.streamlit/secrets.toml`")
+            else:
+                st.info("ℹ️ **Advanced Data** (prices, fundamentals, technicals). "
+                       "Real-time quotes and comprehensive market data. "
+                       "See [API Documentation](https://financialdata.net/documentation) for details.")
             
             st.markdown("---")
-            st.subheader("TradingView Configuration")
+            st.subheader("Advanced Data Configuration")
             
-            # Field selector with safe defaults
-            with st.expander("Advanced Fields (Optional)", expanded=False):
-                st.markdown("Select additional technical/fundamental fields beyond defaults (close, volume, change, market_cap_basic):")
+            # Field selector
+            with st.expander("Additional Fields (Optional)", expanded=False):
+                st.markdown("Select additional fields beyond defaults (price, volume, market_cap):")
                 
-                # Group fields by category for better UX
+                # Group fields by category
                 st.markdown("**Technical Indicators:**")
                 col1, col2 = st.columns(2)
                 with col1:
-                    if st.checkbox("Relative Volume (10d)", key="tv_relvol"):
-                        tradingview_fields.append("relative_volume_10d_calc")
-                    if st.checkbox("RSI", key="tv_rsi"):
-                        tradingview_fields.append("RSI")
-                    if st.checkbox("MACD", key="tv_macd"):
-                        tradingview_fields.extend(["MACD.macd", "MACD.signal"])
+                    if st.checkbox("Relative Volume (10d)", key="fdn_relvol"):
+                        financialdata_fields.append("relative_volume_10d")
+                    if st.checkbox("RSI", key="fdn_rsi"):
+                        financialdata_fields.append("rsi")
+                    if st.checkbox("MACD", key="fdn_macd"):
+                        financialdata_fields.append("macd")
                 with col2:
-                    if st.checkbox("Stochastic", key="tv_stoch"):
-                        tradingview_fields.extend(["Stoch.K", "Stoch.D"])
-                    if st.checkbox("Bollinger Bands", key="tv_bb"):
-                        tradingview_fields.extend(["BB.upper", "BB.lower"])
-                    if st.checkbox("VWAP", key="tv_vwap"):
-                        tradingview_fields.append("VWAP")
+                    if st.checkbox("SMA 50", key="fdn_sma50"):
+                        financialdata_fields.append("sma_50")
+                    if st.checkbox("SMA 150", key="fdn_sma150"):
+                        financialdata_fields.append("sma_150")
+                    if st.checkbox("SMA 200", key="fdn_sma200"):
+                        financialdata_fields.append("sma_200")
                 
                 st.markdown("**Moving Averages:**")
                 ema_options = st.multiselect(
@@ -476,16 +535,20 @@ def main():
                     help="Select exponential moving average periods"
                 )
                 for period in ema_options:
-                    tradingview_fields.append(f"EMA{period}")
+                    financialdata_fields.append(f"ema_{period}")
+                
+                st.markdown("**Fundamentals:**")
+                if st.checkbox("P/E Ratio", key="fdn_pe"):
+                    financialdata_fields.append("pe_ratio")
+                if st.checkbox("EPS", key="fdn_eps"):
+                    financialdata_fields.append("eps")
             
-            # Result limit
-            tradingview_limit = st.slider(
-                "Result Limit",
-                min_value=50,
-                max_value=500,
-                value=500,
-                step=50,
-                help="Cap results to keep UI responsive (max: 500)"
+            # Timeframe selector
+            financialdata_interval = st.selectbox(
+                "Timeframe",
+                options=["1d", "1h", "5m"],
+                index=0,
+                help="Select timeframe for OHLCV data"
             )
         
         # Alpaca-specific configuration (show when Alpaca is selected)
@@ -644,8 +707,8 @@ def main():
         else:
             with st.spinner(f"Fetching data for {len(symbols)} symbols..."):
                 # Fetch and filter data with diagnostic counts
-                # Convert tradingview_fields to tuple for hashable caching
-                tradingview_fields_tuple = tuple(tradingview_fields) if tradingview_fields else ()
+                # Convert financialdata_fields to tuple for hashable caching
+                financialdata_fields_tuple = tuple(financialdata_fields) if financialdata_fields else ()
                 
                 results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
                     source, symbols, min_price, max_price,
@@ -653,8 +716,8 @@ def main():
                     alpaca_api_secret=alpaca_api_secret,
                     alpaca_movers_type=alpaca_movers_type,
                     alpaca_top_n=alpaca_top_n,
-                    tradingview_fields=tradingview_fields_tuple,
-                    tradingview_limit=tradingview_limit
+                    financialdata_fields=financialdata_fields_tuple,
+                    financialdata_interval=financialdata_interval
                 )
                 
                 # Store in session state
@@ -732,15 +795,15 @@ def main():
                 badge_color = "green"
                 badge_text = "✅ Alpaca (Intraday)"
                 badge_help = "Real-time intraday data from Alpaca"
-        elif data_source == "TradingView (Advanced)":
+        elif data_source == "Advanced Data (financialdata.net)":
             if is_fallback:
                 badge_color = "orange"
-                badge_text = "⚠️ TradingView (Fallback to Yahoo)"
-                badge_help = "TradingView unavailable, using Yahoo Finance as fallback. Session cookies may be required for real-time data."
+                badge_text = "⚠️ FinancialData.Net (Fallback to Yahoo)"
+                badge_help = "FinancialData.Net unavailable or missing API key, using Yahoo Finance as fallback"
             else:
                 badge_color = "green"
-                badge_text = "✅ TradingView (Advanced)"
-                badge_help = "Advanced data with technical indicators from TradingView"
+                badge_text = "✅ FinancialData.Net"
+                badge_help = "Advanced data with prices, fundamentals, and technicals from FinancialData.Net"
         else:
             badge_color = "gray"
             badge_text = f"📊 {data_source}"
