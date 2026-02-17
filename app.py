@@ -468,7 +468,7 @@ def run_automated_scenarios():
     - Multiple universe sets
     - Multiple price ranges
     
-    Returns all results in a consolidated view.
+    Displays all results in a consolidated view via Streamlit UI.
     """
     st.subheader("🤖 Auto-Run Mode - Running Automated Scenarios")
     st.info("Running through various scenarios automatically. This may take a few moments...")
@@ -555,7 +555,7 @@ def run_automated_scenarios():
             {
                 'name': 'Alpaca Most Actives - All Prices',
                 'source': 'Alpaca Movers (Intraday)',
-                'universe': 'S&P 500',  # Will be overridden by Alpaca movers
+                'universe': 'All NMS',  # Placeholder - Alpaca provides its own symbol list via movers API
                 'min_price': 0.0,
                 'max_price': 10000.0,
                 'custom_symbols': None,
@@ -565,7 +565,7 @@ def run_automated_scenarios():
             {
                 'name': 'Alpaca Gainers - Swing Trades',
                 'source': 'Alpaca Movers (Intraday)',
-                'universe': 'S&P 500',
+                'universe': 'All NMS',  # Placeholder - Alpaca provides its own symbol list via movers API
                 'min_price': 10.0,
                 'max_price': 200.0,
                 'custom_symbols': None,
@@ -589,8 +589,8 @@ def run_automated_scenarios():
         
         try:
             # Get symbols
-            custom_symbols_tuple = tuple(scenario['custom_symbols']) if scenario.get('custom_symbols') else None
-            symbols = get_cached_universe_symbols(scenario['universe'], custom_symbols_tuple)
+            custom_symbols_for_cache = tuple(scenario['custom_symbols']) if scenario.get('custom_symbols') else None
+            symbols = get_cached_universe_symbols(scenario['universe'], custom_symbols_for_cache)
             
             if not symbols:
                 all_results.append({
@@ -719,10 +719,13 @@ def run_automated_scenarios():
                 
                 # Download button
                 csv = result['results'].to_csv(index=False)
+                # Sanitize filename: replace non-alphanumeric chars with underscores
+                import re
+                safe_filename = re.sub(r'[^a-zA-Z0-9_-]', '_', result['scenario'])
                 st.download_button(
                     label=f"📥 Download {result['scenario']} (CSV)",
                     data=csv,
-                    file_name=f"{result['scenario'].replace(' ', '_').lower()}_results.csv",
+                    file_name=f"{safe_filename}_results.csv",
                     mime="text/csv",
                     key=f"download_{result['scenario']}"
                 )
