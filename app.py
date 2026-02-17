@@ -10,6 +10,11 @@ import os
 from datetime import datetime, date
 import time
 import traceback
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if it exists
+# This should be called before importing any modules that use env vars
+load_dotenv(override=False)  # Don't override existing environment variables
 
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))

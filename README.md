@@ -32,11 +32,17 @@ cd SwingTrade_Screeener
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables (optional):
+3. Set up environment variables:
 ```bash
 cp .env.example .env
 # Edit .env and add your API keys
 ```
+
+**Important**: After creating the `.env` file, edit it and replace the placeholder values with your actual API keys:
+- `FINANCIALDATA_API_KEY` - Get from [FinancialData.Net](https://financialdata.net/)
+- `ALPACA_API_KEY` and `ALPACA_API_SECRET` - Get from [Alpaca Markets](https://alpaca.markets/)
+
+The application will automatically load these variables when it starts.
 
 ## Usage
 
@@ -58,20 +64,27 @@ To use the Advanced Data source with comprehensive market data:
 
 2. **Configure API Key**:
 
-   **Option A: Environment Variable (Recommended)**
+   You have three options to provide your API key (in order of recommendation):
+
+   **Option A: .env File (Recommended)**
+   ```bash
+   # If you haven't already, copy the example file:
+   cp .env.example .env
+   
+   # Edit .env and set your key:
+   # FINANCIALDATA_API_KEY=your_actual_api_key_here
+   ```
+   The application automatically loads the `.env` file on startup.
+
+   **Option B: Environment Variable**
    ```bash
    export FINANCIALDATA_API_KEY="your_api_key_here"
    ```
 
-   **Option B: Streamlit Secrets**
+   **Option C: Streamlit Secrets**
    Create `.streamlit/secrets.toml`:
    ```toml
    FINANCIALDATA_API_KEY = "your_api_key_here"
-   ```
-
-   **Option C: .env File**
-   ```bash
-   echo "FINANCIALDATA_API_KEY=your_api_key_here" > .env
    ```
 
 3. **Features**:
@@ -100,13 +113,26 @@ To use the Alpaca Movers (Intraday) data source:
 
 2. **Configure API Credentials**:
 
-   **Option A: Environment Variables (Recommended)**
+   You have three options to provide your Alpaca API credentials (in order of recommendation):
+
+   **Option A: .env File (Recommended)**
+   ```bash
+   # If you haven't already, copy the example file:
+   cp .env.example .env
+   
+   # Edit .env and set your credentials:
+   # ALPACA_API_KEY=your_actual_api_key_here
+   # ALPACA_API_SECRET=your_actual_api_secret_here
+   ```
+   The application automatically loads the `.env` file on startup.
+
+   **Option B: Environment Variables**
    ```bash
    export ALPACA_API_KEY="your_api_key_here"
    export ALPACA_API_SECRET="your_api_secret_here"
    ```
 
-   **Option B: UI Input**
+   **Option C: UI Input**
    - Select "Alpaca Movers (Intraday)" in the Universe Source
    - Expand "API Credentials" section in sidebar
    - Enter your API Key and Secret
