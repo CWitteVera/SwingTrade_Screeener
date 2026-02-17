@@ -231,8 +231,6 @@ class StockScorer:
         for ma_name, ma_value in mas.items():
             if current_price > ma_value:
                 ma_score += 100
-            else:
-                ma_score += 0
             ma_count += 1
         scores['moving_avg'] = ma_score / ma_count if ma_count > 0 else 50
         

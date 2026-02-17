@@ -51,7 +51,7 @@ class StockVisualizer:
         if hist_data is not None and not hist_data.empty and len(hist_data) > 5:
             # Show last 30 days of history
             recent_hist = hist_data.tail(30).copy()
-            recent_hist['day'] = range(-len(recent_hist), 0)
+            recent_hist['day'] = list(range(-len(recent_hist), 0))
             ax.plot(recent_hist['day'], recent_hist['Close'], 
                    color='#2E86AB', linewidth=1.5, label='Historical Price')
             
@@ -206,7 +206,7 @@ class StockVisualizer:
         # If we have historical data, plot it
         if hist_data is not None and not hist_data.empty and len(hist_data) > 5:
             recent_hist = hist_data.tail(30).copy()
-            recent_hist['day'] = range(-len(recent_hist), 0)
+            recent_hist['day'] = list(range(-len(recent_hist), 0))
             ax1.plot(recent_hist['day'], recent_hist['Close'], 
                     color='#2E86AB', linewidth=1.5, label='Historical')
             ax1.scatter([0], [current_price], color='#2E86AB', s=50, zorder=5)
