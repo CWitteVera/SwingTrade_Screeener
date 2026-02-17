@@ -4,3 +4,4 @@ yfinance>=0.2.32
 requests>=2.31.0
 alpaca-py>=0.8.2
 fdnpy>=0.1.0
+python-dotenv>=1.0.0
