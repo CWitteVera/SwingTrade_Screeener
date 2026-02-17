@@ -458,12 +458,309 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     return df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info
 
 
+def run_automated_scenarios():
+    """
+    Run automated screening scenarios across multiple configurations
+    
+    This function executes a series of predefined screening scenarios
+    automatically without requiring user interaction. It cycles through:
+    - Multiple data sources
+    - Multiple universe sets
+    - Multiple price ranges
+    
+    Returns all results in a consolidated view.
+    """
+    st.subheader("🤖 Auto-Run Mode - Running Automated Scenarios")
+    st.info("Running through various scenarios automatically. This may take a few moments...")
+    
+    # Define scenarios to test
+    scenarios = [
+        {
+            'name': 'S&P 500 - Swing Trades (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'S&P 500',
+            'min_price': 10.0,
+            'max_price': 200.0,
+            'custom_symbols': None
+        },
+        {
+            'name': 'NASDAQ-100 - Swing Trades (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'NASDAQ-100',
+            'min_price': 10.0,
+            'max_price': 200.0,
+            'custom_symbols': None
+        },
+        {
+            'name': 'Leveraged ETFs - All Prices (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'Leveraged ETFs',
+            'min_price': 0.0,
+            'max_price': 10000.0,
+            'custom_symbols': None
+        },
+        {
+            'name': 'S&P 500 - Penny Stocks (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'S&P 500',
+            'min_price': 1.0,
+            'max_price': 10.0,
+            'custom_symbols': None
+        },
+        {
+            'name': 'NASDAQ-100 - High Value (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'NASDAQ-100',
+            'min_price': 200.0,
+            'max_price': 10000.0,
+            'custom_symbols': None
+        },
+        {
+            'name': 'All NMS - Swing Trades (Yahoo)',
+            'source': 'Yahoo (EOD)',
+            'universe': 'All NMS',
+            'min_price': 10.0,
+            'max_price': 200.0,
+            'custom_symbols': None
+        }
+    ]
+    
+    # Check if Advanced Data is available
+    fdn_source = FinancialDataNetSource()
+    if fdn_source.is_available():
+        scenarios.extend([
+            {
+                'name': 'S&P 500 - Swing Trades (Advanced)',
+                'source': 'Advanced Data (financialdata.net)',
+                'universe': 'S&P 500',
+                'min_price': 10.0,
+                'max_price': 200.0,
+                'custom_symbols': None
+            },
+            {
+                'name': 'NASDAQ-100 - Swing Trades (Advanced)',
+                'source': 'Advanced Data (financialdata.net)',
+                'universe': 'NASDAQ-100',
+                'min_price': 10.0,
+                'max_price': 200.0,
+                'custom_symbols': None
+            }
+        ])
+    
+    # Check if Alpaca is available
+    alpaca_key = os.getenv('ALPACA_API_KEY')
+    alpaca_secret = os.getenv('ALPACA_API_SECRET')
+    if alpaca_key and alpaca_secret:
+        scenarios.extend([
+            {
+                'name': 'Alpaca Most Actives - All Prices',
+                'source': 'Alpaca Movers (Intraday)',
+                'universe': 'S&P 500',  # Will be overridden by Alpaca movers
+                'min_price': 0.0,
+                'max_price': 10000.0,
+                'custom_symbols': None,
+                'alpaca_movers_type': 'most_actives',
+                'alpaca_top_n': 50
+            },
+            {
+                'name': 'Alpaca Gainers - Swing Trades',
+                'source': 'Alpaca Movers (Intraday)',
+                'universe': 'S&P 500',
+                'min_price': 10.0,
+                'max_price': 200.0,
+                'custom_symbols': None,
+                'alpaca_movers_type': 'gainers',
+                'alpaca_top_n': 50
+            }
+        ])
+    
+    # Progress tracking
+    total_scenarios = len(scenarios)
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+    
+    # Store all results
+    all_results = []
+    
+    # Run each scenario
+    for idx, scenario in enumerate(scenarios):
+        status_text.text(f"Running scenario {idx + 1}/{total_scenarios}: {scenario['name']}...")
+        progress_bar.progress((idx + 1) / total_scenarios)
+        
+        try:
+            # Get symbols
+            custom_symbols_tuple = tuple(scenario['custom_symbols']) if scenario.get('custom_symbols') else None
+            symbols = get_cached_universe_symbols(scenario['universe'], custom_symbols_tuple)
+            
+            if not symbols:
+                all_results.append({
+                    'scenario': scenario['name'],
+                    'status': 'failed',
+                    'error': 'No symbols in universe',
+                    'results': pd.DataFrame()
+                })
+                continue
+            
+            # Fetch and filter data
+            alpaca_api_key = alpaca_key if scenario['source'] == 'Alpaca Movers (Intraday)' else None
+            alpaca_api_secret = alpaca_secret if scenario['source'] == 'Alpaca Movers (Intraday)' else None
+            alpaca_movers_type = scenario.get('alpaca_movers_type', 'most_actives')
+            alpaca_top_n = scenario.get('alpaca_top_n', 50)
+            
+            results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
+                scenario['source'], 
+                symbols, 
+                scenario['min_price'], 
+                scenario['max_price'],
+                alpaca_api_key=alpaca_api_key,
+                alpaca_api_secret=alpaca_api_secret,
+                alpaca_movers_type=alpaca_movers_type,
+                alpaca_top_n=alpaca_top_n
+            )
+            
+            all_results.append({
+                'scenario': scenario['name'],
+                'status': 'success' if not results_df.empty else 'no_results',
+                'source': scenario['source'],
+                'universe': scenario['universe'],
+                'price_range': f"${scenario['min_price']:.0f} - ${scenario['max_price']:.0f}",
+                'fetched_count': fetched_count,
+                'results_count': len(results_df),
+                'is_fallback': is_fallback,
+                'results': results_df,
+                'error': error_info
+            })
+            
+        except Exception as e:
+            all_results.append({
+                'scenario': scenario['name'],
+                'status': 'failed',
+                'error': str(e),
+                'results': pd.DataFrame()
+            })
+    
+    # Clear progress indicators
+    progress_bar.empty()
+    status_text.empty()
+    
+    # Display summary
+    st.success(f"✅ Completed {total_scenarios} automated scenarios!")
+    st.markdown("---")
+    
+    # Summary table
+    st.subheader("📊 Scenario Summary")
+    summary_data = []
+    for result in all_results:
+        summary_data.append({
+            'Scenario': result['scenario'],
+            'Status': '✅ Success' if result['status'] == 'success' else ('⚠️ No Results' if result['status'] == 'no_results' else '❌ Failed'),
+            'Source': result.get('source', 'N/A'),
+            'Universe': result.get('universe', 'N/A'),
+            'Price Range': result.get('price_range', 'N/A'),
+            'Results Found': result.get('results_count', 0)
+        })
+    
+    summary_df = pd.DataFrame(summary_data)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    
+    # Show detailed results for each successful scenario
+    st.markdown("---")
+    st.subheader("📈 Detailed Results")
+    
+    successful_results = [r for r in all_results if r['status'] == 'success' and not r['results'].empty]
+    
+    if not successful_results:
+        st.warning("⚠️ No scenarios returned results. This could be due to:")
+        st.markdown("""
+        - Restrictive price filters (try wider ranges)
+        - API connectivity issues
+        - Empty universe sets
+        - All stocks filtered out by price criteria
+        
+        **Recommendations:**
+        1. Check your API keys are configured correctly
+        2. Try running individual scenarios with broader price ranges
+        3. Enable Developer Mode to see detailed error logs
+        """)
+    else:
+        for result in successful_results:
+            with st.expander(f"🔍 {result['scenario']} - {result['results_count']} stocks found", expanded=True):
+                st.write(f"**Source:** {result['source']}")
+                st.write(f"**Universe:** {result['universe']}")
+                st.write(f"**Price Range:** {result['price_range']}")
+                
+                if result.get('is_fallback'):
+                    st.warning("⚠️ Using fallback data source (Yahoo Finance)")
+                
+                # Display results
+                display_df = result['results'].copy()
+                
+                # Format the dataframe
+                if 'price' in display_df.columns:
+                    display_df['price'] = display_df['price'].apply(lambda x: f"${x:,.2f}")
+                if 'volume' in display_df.columns:
+                    display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
+                if 'change' in display_df.columns:
+                    display_df['change'] = display_df['change'].apply(lambda x: f"${x:,.2f}")
+                if 'change_pct' in display_df.columns:
+                    display_df['change_pct'] = display_df['change_pct'].apply(lambda x: f"{x:+.2f}%")
+                
+                # Rename columns
+                column_mapping = {
+                    'symbol': 'Symbol',
+                    'price': 'Price',
+                    'volume': 'Volume',
+                    'change': 'Change ($)',
+                    'change_pct': 'Change (%)',
+                }
+                display_df = display_df.rename(columns={col: column_mapping.get(col, col) for col in display_df.columns})
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                # Download button
+                csv = result['results'].to_csv(index=False)
+                st.download_button(
+                    label=f"📥 Download {result['scenario']} (CSV)",
+                    data=csv,
+                    file_name=f"{result['scenario'].replace(' ', '_').lower()}_results.csv",
+                    mime="text/csv",
+                    key=f"download_{result['scenario']}"
+                )
+    
+    # Show failed scenarios if any
+    failed_results = [r for r in all_results if r['status'] == 'failed']
+    if failed_results:
+        st.markdown("---")
+        st.subheader("❌ Failed Scenarios")
+        for result in failed_results:
+            with st.expander(f"⚠️ {result['scenario']}", expanded=False):
+                st.error(f"**Error:** {result.get('error', 'Unknown error')}")
+
+
 def main():
     """Main application"""
     # Initialize session state for scalability
     init_session_state()
     
     st.title("📈 SwingTrade Stock Screener")
+    st.markdown("---")
+    
+    # ========================================================================
+    # AUTO-RUN MODE TOGGLE (Top of page)
+    # ========================================================================
+    auto_run_mode = st.checkbox(
+        "🤖 Enable Auto-Run Mode",
+        value=False,
+        help="Automatically run through multiple screening scenarios without manual selection. "
+             "This will test various combinations of data sources, universes, and price ranges."
+    )
+    
+    if auto_run_mode:
+        run_automated_scenarios()
+        st.markdown("---")
+        st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode.")
+        return  # Exit early, don't show manual controls
+    
     st.markdown("---")
     
     # ========================================================================
