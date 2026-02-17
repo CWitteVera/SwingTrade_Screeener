@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from universe_sets import get_universe_symbols
 from data_sources import YahooDataSource, AlpacaDataSource, FinancialDataNetSource
+from data_sources.financialdata_client import HAS_SDK
 
 
 # Page configuration
@@ -445,27 +446,52 @@ def main():
     st.title("📈 SwingTrade Stock Screener")
     st.markdown("---")
     
-    # Sidebar for filters
+    # ========================================================================
+    # API STATUS DASHBOARD (Top of main area, before sidebar)
+    # ========================================================================
+    st.subheader("🔌 API Status Dashboard")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        # FinancialData API Status
+        fdn_source = FinancialDataNetSource()
+        if fdn_source.is_available():
+            st.success("✅ FinancialData API")
+            st.caption("Connected & Ready")
+        else:
+            st.warning("⚠️ FinancialData API")
+            st.caption("Not configured (fallback to Yahoo)")
+    
+    with col2:
+        # Alpaca API Status
+        alpaca_key = os.getenv('ALPACA_API_KEY')
+        alpaca_secret = os.getenv('ALPACA_API_SECRET')
+        if alpaca_key and alpaca_secret:
+            st.success("✅ Alpaca API")
+            st.caption("Credentials loaded")
+        else:
+            st.info("ℹ️ Alpaca API")
+            st.caption("Not configured (optional)")
+    
+    with col3:
+        # Developer Mode Status
+        dev_mode = st.session_state.get('debug_log', {}).get('enabled', False)
+        if dev_mode:
+            st.info("🔧 Developer Mode: ON")
+            st.caption("Debug logging enabled")
+        else:
+            st.info("Developer Mode: OFF")
+            st.caption("Standard operation")
+    
+    st.markdown("---")
+    
+    # ========================================================================
+    # SIDEBAR - REORGANIZED INTO NUMBERED SECTIONS
+    # ========================================================================
     with st.sidebar:
         st.header("Filters")
         
-        # Settings section
-        with st.expander("⚙️ Settings", expanded=False):
-            st.markdown("**API Configuration**")
-            st.info("Set `FINANCIALDATA_API_KEY` to enable Advanced Data:\n\n"
-                   "• Environment variable\n"
-                   "• `.streamlit/secrets.toml`\n"
-                   "• `.env` file\n\n"
-                   "Get your key from [FinancialData.Net](https://financialdata.net/)")
-            
-            st.markdown("**Alpaca Configuration**")
-            st.info("Set `ALPACA_API_KEY` and `ALPACA_API_SECRET` to enable Alpaca Movers:\n\n"
-                   "• Environment variables\n"
-                   "• UI input (below)\n"
-                   "• `.env` file\n\n"
-                   "Get your keys from [Alpaca Markets](https://alpaca.markets/)")
-        
-        # Developer Mode Toggle
+        # Developer Mode Toggle (at top for easy access)
         st.markdown("---")
         st.subheader("🔧 Developer Mode")
         developer_mode = st.checkbox(
@@ -481,8 +507,10 @@ def main():
         
         st.markdown("---")
         
-        # Universe Source
-        st.subheader("Universe Source")
+        # ====================================================================
+        # SECTION 1️⃣: DATA SOURCE
+        # ====================================================================
+        st.subheader("1️⃣ Data Source")
         source = st.radio(
             "Select data source:",
             ["Yahoo (EOD)", "Advanced Data (financialdata.net)", "Alpaca Movers (Intraday)"],
@@ -490,32 +518,123 @@ def main():
             help="Choose the data source for stock prices"
         )
         
-        # FinancialData.Net-specific configuration
+        st.markdown("---")
+        
+        # ====================================================================
+        # SECTION 2️⃣: UNIVERSE
+        # ====================================================================
+        st.subheader("2️⃣ Universe")
+        universe_set = st.selectbox(
+            "Select universe:",
+            ["All NMS", "S&P 500", "NASDAQ-100", "Leveraged ETFs", "Custom CSV"],
+            index=1,  # Default to S&P 500
+            help="Choose the set of stocks to screen"
+        )
+        
+        # Custom symbols input
+        custom_symbols = []
+        if universe_set == "Custom CSV":
+            custom_text = st.text_area(
+                "Enter symbols (comma-separated):",
+                placeholder="AAPL, MSFT, GOOGL, AMZN",
+                help="Enter stock symbols separated by commas"
+            )
+            custom_symbols = parse_custom_symbols(custom_text)
+        
+        st.markdown("---")
+        
+        # ====================================================================
+        # SECTION 3️⃣: PRICE RANGE
+        # ====================================================================
+        st.subheader("3️⃣ Price Range")
+        
+        # Preset options dropdown
+        price_preset = st.selectbox(
+            "Preset:",
+            ["Penny Stocks ($1-$10)", "Swing Trades ($10-$200)", "All Prices", "Custom"],
+            index=1,  # Default to Swing Trades
+            help="Select a price range preset or choose Custom for manual entry"
+        )
+        
+        # Set price range based on preset
+        if price_preset == "Penny Stocks ($1-$10)":
+            min_price = 1.0
+            max_price = 10.0
+        elif price_preset == "Swing Trades ($10-$200)":
+            min_price = 10.0
+            max_price = 200.0
+        elif price_preset == "All Prices":
+            min_price = 0.0
+            max_price = 10000.0
+        else:  # Custom
+            col1, col2 = st.columns(2)
+            with col1:
+                min_price = st.number_input(
+                    "Min Price ($)",
+                    min_value=0.0,
+                    max_value=10000.0,
+                    value=0.0,
+                    step=1.0
+                )
+            with col2:
+                max_price = st.number_input(
+                    "Max Price ($)",
+                    min_value=0.0,
+                    max_value=10000.0,
+                    value=1000.0,
+                    step=1.0
+                )
+        
+        # Validation: Check if price_min >= price_max
+        price_range_valid = min_price < max_price
+        if not price_range_valid:
+            st.warning("⚠️ **Invalid Price Range**: Min price must be less than max price. "
+                      "No price filtering will be applied. Please adjust the range.")
+        
+        # Price range slider for visual feedback
+        slider_max = min(max_price, 1000.0)
+        st.slider(
+            "Price Range Visual",
+            min_value=0.0,
+            max_value=max(slider_max, 100.0),
+            value=(min_price, min(max_price, slider_max)),
+            disabled=True,
+            help="Visual representation of selected price range"
+        )
+        
+        st.markdown("---")
+        
+        # ====================================================================
+        # SECTION 4️⃣: TECHNICAL INDICATORS (for FinancialData)
+        # ====================================================================
         financialdata_fields = []
         financialdata_interval = '1d'
         
         if source == "Advanced Data (financialdata.net)":
-            # Check if API key is available
+            st.subheader("4️⃣ Technical Indicators")
+            
+            # Check if API key is available and show detailed error if not
             fdn_source = FinancialDataNetSource()
             if not fdn_source.is_available():
-                st.warning("⚠️ **Missing FinancialData.Net API Key**: No API key found. "
-                          "The app will fall back to Yahoo Finance data. "
-                          "To use Advanced Data:\n"
-                          "1. Get your API key from [FinancialData.Net](https://financialdata.net/)\n"
-                          "2. Set `FINANCIALDATA_API_KEY` in environment or `.streamlit/secrets.toml`")
-            else:
-                st.info("ℹ️ **Advanced Data** (prices, fundamentals, technicals). "
-                       "Real-time quotes and comprehensive market data. "
-                       "See [API Documentation](https://financialdata.net/documentation) for details.")
-            
-            st.markdown("---")
-            st.subheader("Advanced Data Configuration")
-            
-            # Field selector
-            with st.expander("Additional Fields (Optional)", expanded=False):
-                st.markdown("Select additional fields beyond defaults (price, volume, market_cap):")
+                st.error("⚠️ **FinancialData API Key Missing**\n\n"
+                        "The app will fall back to Yahoo Finance data.\n\n"
+                        "**To enable Advanced Data:**\n\n"
+                        "Add this to your `.env` file:\n"
+                        "```\n"
+                        "FINANCIALDATA_API_KEY=your_api_key_here\n"
+                        "```\n\n"
+                        "Get your API key from [FinancialData.Net](https://financialdata.net/)")
                 
-                # Group fields by category
+                # Debug expander
+                with st.expander("🔍 Debug Information", expanded=False):
+                    st.write("**SDK Status:**", "✅ Installed" if HAS_SDK else "❌ Not Installed")
+                    api_key = os.getenv('FINANCIALDATA_API_KEY')
+                    st.write("**API Key Found:**", "✅ Yes" if api_key else "❌ No")
+                    st.write("**Client Available:**", "✅ Yes" if fdn_source.client else "❌ No")
+            else:
+                st.success("ℹ️ **Advanced Data Active** - Select optional fields below")
+                
+                # Field selector - MOVED OUT of expander for direct access
                 st.markdown("**Technical Indicators:**")
                 col1, col2 = st.columns(2)
                 with col1:
@@ -543,47 +662,50 @@ def main():
                     financialdata_fields.append(f"ema_{period}")
                 
                 st.markdown("**Fundamentals:**")
-                if st.checkbox("P/E Ratio", key="fdn_pe"):
-                    financialdata_fields.append("pe_ratio")
-                if st.checkbox("EPS", key="fdn_eps"):
-                    financialdata_fields.append("eps")
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.checkbox("P/E Ratio", key="fdn_pe"):
+                        financialdata_fields.append("pe_ratio")
+                with col2:
+                    if st.checkbox("EPS", key="fdn_eps"):
+                        financialdata_fields.append("eps")
+                
+                # Timeframe selector
+                financialdata_interval = st.selectbox(
+                    "Timeframe",
+                    options=["1d", "1h", "5m"],
+                    index=0,
+                    help="Select timeframe for OHLCV data"
+                )
             
-            # Timeframe selector
-            financialdata_interval = st.selectbox(
-                "Timeframe",
-                options=["1d", "1h", "5m"],
-                index=0,
-                help="Select timeframe for OHLCV data"
-            )
+            st.markdown("---")
         
-        # Alpaca-specific configuration (show when Alpaca is selected)
+        # Alpaca-specific configuration (environment-only approach)
         alpaca_api_key = None
         alpaca_api_secret = None
         alpaca_movers_type = "most_actives"
         alpaca_top_n = 50
         
         if source == "Alpaca Movers (Intraday)":
-            st.markdown("---")
-            st.subheader("Alpaca Configuration")
+            st.subheader("4️⃣ Alpaca Configuration")
             
-            # API credentials (with env var fallback)
-            with st.expander("API Credentials", expanded=False):
-                alpaca_api_key = st.text_input(
-                    "API Key",
-                    type="password",
-                    placeholder="Enter Alpaca API Key or set ALPACA_API_KEY env var",
-                    help="Leave empty to use ALPACA_API_KEY environment variable"
-                )
-                alpaca_api_secret = st.text_input(
-                    "API Secret",
-                    type="password",
-                    placeholder="Enter Alpaca API Secret or set ALPACA_API_SECRET env var",
-                    help="Leave empty to use ALPACA_API_SECRET environment variable"
-                )
-                
-                # Show warning if no credentials provided
-                if not alpaca_api_key and not os.getenv('ALPACA_API_KEY'):
-                    st.warning("⚠️ No API credentials found. Will fall back to Yahoo Finance.")
+            # Read from environment variables only
+            alpaca_api_key = os.getenv('ALPACA_API_KEY')
+            alpaca_api_secret = os.getenv('ALPACA_API_SECRET')
+            
+            # Show status
+            if alpaca_api_key and alpaca_api_secret:
+                st.success("✅ **Alpaca API credentials loaded successfully**")
+            else:
+                st.error("⚠️ **Alpaca API Credentials Missing**\n\n"
+                        "The app will fall back to Yahoo Finance data.\n\n"
+                        "**To enable Alpaca intraday data:**\n\n"
+                        "Add these to your `.env` file:\n"
+                        "```\n"
+                        "ALPACA_API_KEY=your_api_key_here\n"
+                        "ALPACA_API_SECRET=your_api_secret_here\n"
+                        "```\n\n"
+                        "Get your keys from [Alpaca Markets](https://alpaca.markets/)")
             
             # Movers list type
             movers_options = {
@@ -609,66 +731,8 @@ def main():
                 step=10,
                 help="Limit results to keep UI responsive (capped at 100)"
             )
-        
-        st.markdown("---")
-        
-        # Universe Set
-        st.subheader("Universe Set")
-        universe_set = st.selectbox(
-            "Select universe:",
-            ["All NMS", "S&P 500", "NASDAQ-100", "Leveraged ETFs", "Custom CSV"],
-            index=1,  # Default to S&P 500
-            help="Choose the set of stocks to screen"
-        )
-        
-        # Custom symbols input
-        custom_symbols = []
-        if universe_set == "Custom CSV":
-            custom_text = st.text_area(
-                "Enter symbols (comma-separated):",
-                placeholder="AAPL, MSFT, GOOGL, AMZN",
-                help="Enter stock symbols separated by commas"
-            )
-            custom_symbols = parse_custom_symbols(custom_text)
-        
-        st.markdown("---")
-        
-        # Price Range Filter
-        st.subheader("Price Range")
-        col1, col2 = st.columns(2)
-        with col1:
-            min_price = st.number_input(
-                "Min Price ($)",
-                min_value=0.0,
-                max_value=10000.0,
-                value=0.0,
-                step=1.0
-            )
-        with col2:
-            max_price = st.number_input(
-                "Max Price ($)",
-                min_value=0.0,
-                max_value=10000.0,
-                value=1000.0,
-                step=1.0
-            )
-        
-        # Validation: Check if price_min >= price_max
-        price_range_valid = min_price < max_price
-        if not price_range_valid:
-            st.warning("⚠️ **Invalid Price Range**: Min price must be less than max price. "
-                      "No price filtering will be applied. Please adjust the range.")
-        
-        # Price range slider for visual feedback
-        slider_max = min(max_price, 1000.0)
-        st.slider(
-            "Price Range Visual",
-            min_value=0.0,
-            max_value=max(slider_max, 100.0),
-            value=(min_price, min(max_price, slider_max)),
-            disabled=True,
-            help="Visual representation of selected price range"
-        )
+            
+            st.markdown("---")
     
     # Main content area
     st.header("Results")
@@ -710,38 +774,64 @@ def main():
         if not symbols:
             st.warning("⚠️ No symbols to screen. Please select a universe or enter custom symbols.")
         else:
-            with st.spinner(f"Fetching data for {len(symbols)} symbols..."):
-                # Fetch and filter data with diagnostic counts
-                # Convert financialdata_fields to tuple for hashable caching
-                financialdata_fields_tuple = tuple(financialdata_fields) if financialdata_fields else ()
-                
-                results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
-                    source, symbols, min_price, max_price,
-                    alpaca_api_key=alpaca_api_key,
-                    alpaca_api_secret=alpaca_api_secret,
-                    alpaca_movers_type=alpaca_movers_type,
-                    alpaca_top_n=alpaca_top_n,
-                    financialdata_fields=financialdata_fields_tuple,
-                    financialdata_interval=financialdata_interval
-                )
-                
-                # Store in session state
-                st.session_state['results'] = results_df
-                st.session_state['fetched_count'] = fetched_count
-                st.session_state['missing_price_count'] = missing_price_count
-                st.session_state['after_price_filter_count'] = after_price_filter_count
-                st.session_state['filtered_count'] = len(results_df)
-                st.session_state['data_source'] = source
-                st.session_state['truncated'] = truncated
-                st.session_state['is_fallback'] = is_fallback
-                st.session_state['error_info'] = error_info
-                st.session_state['price_range_valid'] = price_range_valid
-                
-                # Update scalability structures for future real-time scanning
-                update_symbol_directory(symbols, universe_set)
-                if not results_df.empty:
-                    update_prior_close_cache(results_df)
-                    add_scan_to_history(results_df)
+            # Progress indicators
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Step 1: Fetching symbols
+            status_text.text("📋 Fetching symbols...")
+            progress_bar.progress(25)
+            time.sleep(0.1)  # Brief pause for visual feedback
+            
+            # Step 2: Downloading data
+            status_text.text(f"⬇️ Downloading data for {len(symbols)} symbols...")
+            progress_bar.progress(50)
+            
+            # Fetch and filter data with diagnostic counts
+            # Convert financialdata_fields to tuple for hashable caching
+            financialdata_fields_tuple = tuple(financialdata_fields) if financialdata_fields else ()
+            
+            results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
+                source, symbols, min_price, max_price,
+                alpaca_api_key=alpaca_api_key,
+                alpaca_api_secret=alpaca_api_secret,
+                alpaca_movers_type=alpaca_movers_type,
+                alpaca_top_n=alpaca_top_n,
+                financialdata_fields=financialdata_fields_tuple,
+                financialdata_interval=financialdata_interval
+            )
+            
+            # Step 3: Applying filters
+            status_text.text("🔍 Applying filters...")
+            progress_bar.progress(75)
+            time.sleep(0.1)
+            
+            # Store in session state
+            st.session_state['results'] = results_df
+            st.session_state['fetched_count'] = fetched_count
+            st.session_state['missing_price_count'] = missing_price_count
+            st.session_state['after_price_filter_count'] = after_price_filter_count
+            st.session_state['filtered_count'] = len(results_df)
+            st.session_state['data_source'] = source
+            st.session_state['truncated'] = truncated
+            st.session_state['is_fallback'] = is_fallback
+            st.session_state['error_info'] = error_info
+            st.session_state['price_range_valid'] = price_range_valid
+            
+            # Update scalability structures for future real-time scanning
+            update_symbol_directory(symbols, universe_set)
+            if not results_df.empty:
+                update_prior_close_cache(results_df)
+                add_scan_to_history(results_df)
+            
+            # Step 4: Complete
+            status_text.text("✅ Complete!")
+            progress_bar.progress(100)
+            time.sleep(0.3)
+            
+            # Clear progress indicators
+            progress_bar.empty()
+            status_text.empty()
     
     # Display results
     if 'results' in st.session_state:
@@ -831,19 +921,37 @@ def main():
         
         st.markdown("---")
         
-        # Results summary
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Matched Symbols", filtered_count, 
-                     help="Symbols passing all filters (currently only price range)")
-        with col2:
-            filter_pct = (filtered_count / len(symbols) * 100) if len(symbols) > 0 else 0
-            st.metric("Filter Rate", f"{filter_pct:.1f}%", 
-                     help="Percentage of requested symbols that passed filters")
-        
         # Display results table
         if not results_df.empty:
             st.subheader("Filtered Stocks")
+            
+            # Add 4-column metrics above results table
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Stocks Found", filtered_count, 
+                         help="Total number of stocks matching all filters")
+            
+            with col2:
+                avg_price = results_df['price'].mean() if 'price' in results_df.columns else 0
+                st.metric("Avg Price", f"${avg_price:.2f}", 
+                         help="Average price of filtered stocks")
+            
+            with col3:
+                avg_volume = results_df['volume'].mean() if 'volume' in results_df.columns else 0
+                st.metric("Avg Volume", f"{avg_volume:,.0f}", 
+                         help="Average daily volume of filtered stocks")
+            
+            with col4:
+                if 'price' in results_df.columns and not results_df.empty:
+                    price_min = results_df['price'].min()
+                    price_max = results_df['price'].max()
+                    st.metric("Price Range", f"${price_min:.2f} - ${price_max:.2f}", 
+                             help="Actual price range of filtered stocks")
+                else:
+                    st.metric("Price Range", "N/A", help="No price data available")
+            
+            st.markdown("---")
             
             # Format the dataframe for display
             display_df = results_df.copy()
