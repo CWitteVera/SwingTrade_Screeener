@@ -267,6 +267,26 @@ def add_scan_to_history(results_df: pd.DataFrame, max_history: int = 10):
 # ============================================================================
 
 
+def format_volume(volume: float) -> str:
+    """
+    Format volume in abbreviated notation (K, M, B)
+    
+    Args:
+        volume: Volume value to format
+        
+    Returns:
+        Formatted string with appropriate suffix
+    """
+    if volume >= 1_000_000_000:
+        return f"{volume / 1_000_000_000:.1f}B"
+    elif volume >= 1_000_000:
+        return f"{volume / 1_000_000:.1f}M"
+    elif volume >= 1_000:
+        return f"{volume / 1_000:.1f}K"
+    else:
+        return f"{volume:.0f}"
+
+
 def parse_custom_symbols(text: str) -> List[str]:
     """Parse comma-separated symbols from text input"""
     if not text:
@@ -781,7 +801,6 @@ def main():
             # Step 1: Fetching symbols
             status_text.text("📋 Fetching symbols...")
             progress_bar.progress(25)
-            time.sleep(0.1)  # Brief pause for visual feedback
             
             # Step 2: Downloading data
             status_text.text(f"⬇️ Downloading data for {len(symbols)} symbols...")
@@ -804,7 +823,6 @@ def main():
             # Step 3: Applying filters
             status_text.text("🔍 Applying filters...")
             progress_bar.progress(75)
-            time.sleep(0.1)
             
             # Store in session state
             st.session_state['results'] = results_df
@@ -827,7 +845,6 @@ def main():
             # Step 4: Complete
             status_text.text("✅ Complete!")
             progress_bar.progress(100)
-            time.sleep(0.3)
             
             # Clear progress indicators
             progress_bar.empty()
@@ -939,7 +956,7 @@ def main():
             
             with col3:
                 avg_volume = results_df['volume'].mean() if 'volume' in results_df.columns else 0
-                st.metric("Avg Volume", f"{avg_volume:,.0f}", 
+                st.metric("Avg Volume", format_volume(avg_volume), 
                          help="Average daily volume of filtered stocks")
             
             with col4:
