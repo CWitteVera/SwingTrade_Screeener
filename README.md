@@ -4,6 +4,11 @@ A modular Streamlit-based stock screener for filtering and analyzing stocks acro
 
 ## Features
 
+- **🏆 Top 3 Scoring System**: NEW! Score and rank stocks by probability of upward trend
+  - Analyzes RSI, MACD, moving averages, volume, and momentum
+  - Shows probability of upward movement with confidence intervals
+  - Displays price predictions with visualization charts
+  - See detailed indicator breakdown for top 3 stocks
 - **🤖 Auto-Run Mode**: NEW! Automatically run multiple screening scenarios without manual selection
   - Test all combinations of universes, price ranges, and data sources
   - Get consolidated results instantly
@@ -232,11 +237,20 @@ For manual control over screening parameters:
    - **Alpaca Users**: Choose movers list type (Most Actives, Gainers, Losers, Top Volume)
 3. **Select Universe Set**: Pick from predefined universe sets or enter custom symbols
 4. **Set Price Range**: Choose preset (Penny Stocks, Swing Trades, All Prices) or enter custom range
-5. **Run Screener**: Click the "Run Screener" button to fetch and filter stocks
-6. **View Results**: See filtered stocks with price, volume, and change information
+5. **Enable Scoring (Optional)**: Check "Enable Top 3 Scoring System" to rank stocks by probability
+   - Select forecast period (7-30 days)
+   - System analyzes RSI, MACD, moving averages, volume, and momentum
+   - See top 3 stocks with detailed analysis and price predictions
+6. **Run Screener**: Click the "Run Screener" button to fetch and filter stocks
+7. **View Results**: See filtered stocks with price, volume, and change information
    - Advanced Data: Technical indicators and fundamentals appear as additional columns
    - Watch for "Results truncated" badge if limit is reached
-7. **Download**: Export results to CSV for further analysis
+   - **Top 3 Stocks** (if scoring enabled): Expandable sections showing:
+     - Composite score and upward probability
+     - Price forecast with confidence intervals
+     - Visual charts for price prediction and indicator breakdown
+     - Detailed indicator values and score contributions
+8. **Download**: Export results to CSV for further analysis
 
 ## Notes
 
@@ -386,6 +400,88 @@ The design follows patterns from high-performance real-time screeners:
 
 For more details on fast real-time screening architecture, see:
 [How to Build a Blazing Fast Real-Time Stock Screener](https://databento.com/blog/how-to-build-a-blazing-fast-real-time-stock-screener-with-python)
+
+## Scoring System
+
+The Stock Scoring System provides an intelligent ranking of filtered stocks based on technical analysis and probability of upward price movement.
+
+### How It Works
+
+1. **Enable the Feature**: Check "Enable Top 3 Scoring System" in the sidebar (Section 5)
+2. **Set Forecast Period**: Choose 7-30 days for price predictions
+3. **Run Screener**: The system automatically scores all filtered stocks
+4. **View Top 3**: See the highest-ranked stocks with detailed analysis
+
+### What You Get
+
+For each of the top 3 stocks, you'll see:
+
+- **🥇 Rank Badge**: Gold, silver, or bronze medal
+- **Composite Score** (0-100): Overall technical strength
+- **Upward Probability** (%): Likelihood of positive price movement
+- **Price Forecast**: 
+  - Expected target price
+  - 80% confidence interval
+  - Historical volatility measure
+- **Visualizations**:
+  - Price forecast chart with confidence bands
+  - Indicator contribution breakdown
+- **Technical Indicators**:
+  - RSI (Relative Strength Index)
+  - MACD (Moving Average Convergence Divergence)
+  - Moving Averages (SMA 20/50, EMA 12/26)
+  - Volume Ratio (current vs. 20-day average)
+  - 10-day Price Momentum
+- **Score Breakdown**: Individual scores for each indicator
+
+### Scoring Methodology
+
+The composite score is calculated using weighted technical indicators:
+
+```
+Component Weights:
+- RSI:              25%
+- MACD:             25%
+- Moving Averages:  20%
+- Volume:           15%
+- Momentum:         15%
+```
+
+Each indicator is scored 0-100 based on bullish/bearish signals:
+- **RSI**: Oversold conditions (30-50) score highest
+- **MACD**: Positive crossovers and histogram score highest
+- **Moving Averages**: Price above MAs scores higher
+- **Volume**: Above-average volume scores higher
+- **Momentum**: Positive price change scores higher
+
+### Example Output
+
+```
+🥇 AAPL - Score: 82.5/100 | Probability: 82.5%
+
+Current Price: $150.25
+Expected Target: $155.80 (+3.7%)
+80% Confidence Range: $152.10 - $159.50
+Volatility: 28.5%
+
+Contributing Indicators:
+- RSI: 42.5 (slightly oversold)
+- MACD: 0.52 (positive)
+- Volume Ratio: 1.35 (above average)
+- Momentum: +4.2% (strong)
+```
+
+For complete details, see [SCORING_SYSTEM_GUIDE.md](SCORING_SYSTEM_GUIDE.md)
+
+### Requirements
+
+- Internet access for historical data (Yahoo Finance)
+- Matplotlib for chart generation (installed automatically)
+- Minimum 20 days of historical data per stock
+
+### Important Notes
+
+⚠️ **Disclaimer**: The scoring system is for educational purposes only. Scores indicate technical probability based on historical patterns, not guaranteed future performance. Always conduct your own research and consult financial advisors before making investment decisions.
 
 ## License
 
