@@ -4,6 +4,10 @@ A modular Streamlit-based stock screener for filtering and analyzing stocks acro
 
 ## Features
 
+- **🤖 Auto-Run Mode**: NEW! Automatically run multiple screening scenarios without manual selection
+  - Test all combinations of universes, price ranges, and data sources
+  - Get consolidated results instantly
+  - Perfect for quick exploration and testing
 - **Multiple Universe Sets**: Screen stocks from S&P 500, NASDAQ-100, All NMS stocks, Leveraged ETFs, or custom symbol lists
 - **Multiple Data Sources**: 
   - Yahoo Finance (EOD data) - End-of-day data with basic fields
@@ -199,15 +203,40 @@ SwingTrade_Screeener/
 
 ## How to Use
 
-1. **Select Universe Source**: Choose between Yahoo (EOD), TradingView (Advanced), or Alpaca Movers (Intraday)
-   - **TradingView Users**: Optionally select advanced technical indicators and set result limit
-2. **Select Universe Set**: Pick from predefined universe sets or enter custom symbols
-3. **Set Price Range**: Define minimum and maximum price filters
-4. **Run Screener**: Click the "Run Screener" button to fetch and filter stocks
-5. **View Results**: See filtered stocks with price, volume, and change information
-   - **TradingView**: Advanced fields (RSI, MACD, etc.) appear as additional columns on the right
-   - Watch for "Results truncated" badge if result limit is reached
-6. **Download**: Export results to CSV for further analysis
+### Auto-Run Mode (Recommended for Quick Results)
+
+**NEW!** Enable **Auto-Run Mode** to automatically screen multiple scenarios without any manual selection:
+
+1. Launch the app: `streamlit run app.py`
+2. Check the box: **🤖 Enable Auto-Run Mode**
+3. Wait while the app automatically runs through various scenarios:
+   - Multiple universes (S&P 500, NASDAQ-100, Leveraged ETFs, All NMS)
+   - Multiple price ranges (Penny Stocks, Swing Trades, High Value)
+   - Available data sources (Yahoo, Advanced Data, Alpaca)
+4. View consolidated results from all scenarios
+5. Download any result set as CSV
+
+**Benefits:**
+- **No manual selection needed** - just enable and go
+- **See all results at once** - comprehensive view across scenarios
+- **Faster exploration** - quickly find which combinations return results
+- **Perfect for testing** - validates your API setup across all data sources
+
+### Manual Mode (Advanced Users)
+
+For manual control over screening parameters:
+
+1. **Uncheck Auto-Run Mode** (if enabled)
+2. **Select Universe Source**: Choose between Yahoo (EOD), Advanced Data (financialdata.net), or Alpaca Movers (Intraday)
+   - **Advanced Data Users**: Optionally select technical indicators (RSI, MACD, EMAs, etc.)
+   - **Alpaca Users**: Choose movers list type (Most Actives, Gainers, Losers, Top Volume)
+3. **Select Universe Set**: Pick from predefined universe sets or enter custom symbols
+4. **Set Price Range**: Choose preset (Penny Stocks, Swing Trades, All Prices) or enter custom range
+5. **Run Screener**: Click the "Run Screener" button to fetch and filter stocks
+6. **View Results**: See filtered stocks with price, volume, and change information
+   - Advanced Data: Technical indicators and fundamentals appear as additional columns
+   - Watch for "Results truncated" badge if limit is reached
+7. **Download**: Export results to CSV for further analysis
 
 ## Notes
 
