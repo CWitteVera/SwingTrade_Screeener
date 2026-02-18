@@ -246,17 +246,17 @@ class StockScorer:
         else:
             scores['volume'] = 30
         
-        # Momentum Score (positive momentum = bullish)
+        # Momentum Score (positive momentum = bullish, penalize negative)
         if momentum > 5:
-            scores['momentum'] = 90
+            scores['momentum'] = 100
         elif momentum > 2:
-            scores['momentum'] = 75
+            scores['momentum'] = 80
         elif momentum > 0:
             scores['momentum'] = 60
         elif momentum > -2:
-            scores['momentum'] = 40
+            scores['momentum'] = 30
         else:
-            scores['momentum'] = 20
+            scores['momentum'] = 0
         
         # Calculate composite score (weighted average)
         weights = {
@@ -298,7 +298,7 @@ class StockScorer:
             'raw_scores': scores
         }
     
-    def rank_stocks(self, stocks_df: pd.DataFrame, top_n: int = 3) -> pd.DataFrame:
+    def rank_stocks(self, stocks_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
         """
         Score and rank stocks, returning top N
         

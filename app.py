@@ -11,6 +11,7 @@ from datetime import datetime, date
 import time
 import traceback
 from dotenv import load_dotenv
+import yfinance as yf
 
 # Load environment variables from .env file if it exists
 # This should be called before importing any modules that use env vars
@@ -25,6 +26,8 @@ from data_sources.financialdata_client import HAS_SDK
 from scoring_system import StockScorer
 from price_predictor import PricePredictor
 from visualizations import StockVisualizer
+from combined_top5 import add_to_top5_aggregator, render_combined_top5_plot
+from trade_signals import suggest_entry_exit
 
 
 # Page configuration
@@ -730,7 +733,7 @@ def run_automated_scenarios():
                 # TOP 3 SCORING SYSTEM FOR AUTO-RUN
                 # ====================================================================
                 st.markdown("---")
-                st.markdown("#### 🏆 Top 3 Stocks by Upward Potential")
+                st.markdown("#### 🏆 Top 5 Stocks by Upward Potential")
                 
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     try:
@@ -740,9 +743,17 @@ def run_automated_scenarios():
                         visualizer = StockVisualizer()
                         
                         # Score and rank stocks
-                        top_stocks = scorer.rank_stocks(result['results'], top_n=3)
+                        top_stocks = scorer.rank_stocks(result['results'], top_n=5)
                         
                         if not top_stocks.empty:
+                            # Add to Top 5 aggregator for combined visualization
+                            scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
+                            add_to_top5_aggregator(
+                                scan_label,
+                                top_stocks,
+                                lambda s: yf.Ticker(s).history(period="120d")
+                            )
+                            
                             # Display each top stock in an expander
                             for idx, row in top_stocks.iterrows():
                                 symbol = row['symbol']
@@ -752,7 +763,7 @@ def run_automated_scenarios():
                                 score_contributions = row.get('score_contributions', {})
                                 
                                 # Rank display
-                                rank_emoji = ["🥇", "🥈", "🥉"]
+                                rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
                                 rank_idx = list(top_stocks.index).index(idx)
                                 
                                 with st.expander(
@@ -875,6 +886,58 @@ def run_automated_scenarios():
         for result in failed_results:
             with st.expander(f"⚠️ {result['scenario']}", expanded=False):
                 st.error(f"**Error:** {result.get('error', 'Unknown error')}")
+    
+    # Render combined Top 5 visualization
+    render_combined_top5_plot(default_lookback=60)
+    
+    # Optional: Entry/Exit Suggestion Preview
+    if "top5_union" in st.session_state and st.session_state["top5_union"]:
+        st.markdown("---")
+        st.markdown("### 🎯 Entry/Exit Suggestions")
+        
+        available_symbols = list(st.session_state["top5_union"].keys())
+        selected_symbol = st.selectbox(
+            "Select a symbol to preview entry/exit suggestions:",
+            [""] + available_symbols,
+            help="Choose a symbol from the Top 5 union to see suggested entry, stop, and target levels"
+        )
+        
+        if selected_symbol:
+            try:
+                ticker = yf.Ticker(selected_symbol)
+                hist_data = ticker.history(period="120d")
+                
+                if not hist_data.empty:
+                    suggestion = suggest_entry_exit(hist_data)
+                    
+                    st.markdown(f"#### {selected_symbol} - {suggestion['strategy']}")
+                    
+                    if suggestion['entry'] is not None:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Entry", f"${suggestion['entry']:.2f}")
+                        with col2:
+                            st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
+                        with col3:
+                            st.metric("Target 1", f"${suggestion['target1']:.2f}")
+                        with col4:
+                            st.metric("Target 2", f"${suggestion['target2']:.2f}")
+                        
+                        st.info(f"**Confidence:** {suggestion['confidence']}")
+                        
+                        if suggestion['notes']:
+                            st.markdown("**Notes:**")
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                    else:
+                        st.warning(f"No clear entry/exit setup detected for {selected_symbol}")
+                        if suggestion['notes']:
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                else:
+                    st.warning(f"Unable to fetch historical data for {selected_symbol}")
+            except Exception as e:
+                st.error(f"Error generating suggestion: {str(e)}")
 
 
 def main():
@@ -1196,9 +1259,9 @@ def main():
         # ====================================================================
         st.subheader("5️⃣ Scoring & Ranking")
         enable_scoring = st.checkbox(
-            "Enable Top 3 Scoring System",
+            "Enable Top 5 Scoring System",
             value=True,
-            help="Score and rank stocks by probability of upward trend. Shows top 3 with detailed analysis and price predictions."
+            help="Score and rank stocks by probability of upward trend. Shows top 5 with detailed analysis and price predictions."
         )
         
         forecast_days = 14
@@ -1512,7 +1575,7 @@ def main():
             # ====================================================================
             if enable_scoring and filtered_count > 0:
                 st.markdown("---")
-                st.subheader("🏆 Top 3 Stocks by Upward Potential")
+                st.subheader("🏆 Top 5 Stocks by Upward Potential")
                 
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     # Initialize scorer and predictor
@@ -1522,7 +1585,7 @@ def main():
                     
                     # Score and rank stocks
                     try:
-                        top_stocks = scorer.rank_stocks(results_df, top_n=3)
+                        top_stocks = scorer.rank_stocks(results_df, top_n=5)
                         
                         if not top_stocks.empty:
                             # Display each top stock in an expander
@@ -1534,7 +1597,7 @@ def main():
                                 score_contributions = row.get('score_contributions', {})
                                 
                                 # Rank display
-                                rank_emoji = ["🥇", "🥈", "🥉"]
+                                rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
                                 rank_idx = list(top_stocks.index).index(idx)
                                 
                                 with st.expander(
