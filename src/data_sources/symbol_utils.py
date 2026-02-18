@@ -4,6 +4,9 @@ Symbol utility functions for data sources
 import re
 from typing import List
 
+# Compile regex pattern at module level for better performance
+VALID_SYMBOL_PATTERN = re.compile(r'^[A-Z0-9.\-]+$')
+
 
 def clean_symbols(symbols: List[str]) -> List[str]:
     """
@@ -32,9 +35,6 @@ def clean_symbols(symbols: List[str]) -> List[str]:
     if not symbols:
         return []
     
-    # Pattern to match valid symbols (A-Z, 0-9, dot, dash)
-    valid_symbol_pattern = re.compile(r'^[A-Z0-9.\-]+$')
-    
     cleaned = []
     seen = set()
     
@@ -51,7 +51,7 @@ def clean_symbols(symbols: List[str]) -> List[str]:
             continue
         
         # Skip symbols with invalid characters
-        if not valid_symbol_pattern.match(symbol):
+        if not VALID_SYMBOL_PATTERN.match(symbol):
             continue
         
         # Skip duplicates (preserve first occurrence order)

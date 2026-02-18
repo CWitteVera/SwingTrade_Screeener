@@ -102,12 +102,31 @@ class FinancialDataNetSource(DataSource):
         
         # Log API key status (mask actual value)
         if api_key:
-            masked_key = api_key[:4] + '*' * (len(api_key) - 4) if len(api_key) > 4 else '****'
+            # Always show first 4 chars + fixed asterisks
+            masked_key = api_key[:4] + '****'
             logger.debug(f"FINANCIALDATA_API_KEY found: {masked_key}")
         else:
             logger.debug("FINANCIALDATA_API_KEY not found in environment or Streamlit secrets")
         
         return api_key
+    
+    def _handle_api_exception(self, e: Exception, context: str = "API request") -> None:
+        """
+        Handle exceptions from FinancialData.Net API with specific handling for 401 errors
+        
+        Args:
+            e: The exception that was raised
+            context: Description of what operation failed (for logging)
+        """
+        # Check for 401 Unauthorized
+        if '401' in str(e) or 'Unauthorized' in str(e):
+            logger.error(
+                f"401 Unauthorized error from FinancialData.Net API during {context}. "
+                f"Please check your FINANCIALDATA_API_KEY and account permissions. "
+                f"Error details: {e}"
+            )
+        else:
+            logger.error(f"Error during {context}: {e}")
     
     def get_name(self) -> str:
         return "Advanced Data (financialdata.net)"
@@ -158,15 +177,7 @@ class FinancialDataNetSource(DataSource):
             return symbols[offset:offset + limit]
             
         except Exception as e:
-            # Check for 401 Unauthorized
-            if '401' in str(e) or 'Unauthorized' in str(e):
-                logger.error(
-                    f"401 Unauthorized error from FinancialData.Net API. "
-                    f"Please check your FINANCIALDATA_API_KEY and account permissions. "
-                    f"Error details: {e}"
-                )
-            else:
-                logger.error(f"Error fetching universe from financialdata.net: {e}")
+            self._handle_api_exception(e, f"universe fetch ({set_name})")
             return []
     
     def get_quotes(self, symbols: List[str]) -> pd.DataFrame:
@@ -213,15 +224,7 @@ class FinancialDataNetSource(DataSource):
             return pd.DataFrame(records)
             
         except Exception as e:
-            # Check for 401 Unauthorized
-            if '401' in str(e) or 'Unauthorized' in str(e):
-                logger.error(
-                    f"401 Unauthorized error from FinancialData.Net API. "
-                    f"Please check your FINANCIALDATA_API_KEY and account permissions. "
-                    f"Error details: {e}"
-                )
-            else:
-                logger.error(f"Error fetching quotes from financialdata.net: {e}")
+            self._handle_api_exception(e, "stock quotes fetch")
             return pd.DataFrame()
     
     def get_ohlcv(self, symbols: List[str], interval: str = '1d', 
@@ -277,15 +280,7 @@ class FinancialDataNetSource(DataSource):
                 result[symbol] = df
                 
             except Exception as e:
-                # Check for 401 Unauthorized
-                if '401' in str(e) or 'Unauthorized' in str(e):
-                    logger.error(
-                        f"401 Unauthorized error from FinancialData.Net API for {symbol}. "
-                        f"Please check your FINANCIALDATA_API_KEY and account permissions. "
-                        f"Error details: {e}"
-                    )
-                else:
-                    logger.error(f"Error fetching OHLCV for {symbol}: {e}")
+                self._handle_api_exception(e, f"OHLCV fetch for {symbol}")
                 continue
         
         return result
@@ -336,15 +331,7 @@ class FinancialDataNetSource(DataSource):
                 records.append(record)
                 
             except Exception as e:
-                # Check for 401 Unauthorized
-                if '401' in str(e) or 'Unauthorized' in str(e):
-                    logger.error(
-                        f"401 Unauthorized error from FinancialData.Net API for {symbol}. "
-                        f"Please check your FINANCIALDATA_API_KEY and account permissions. "
-                        f"Error details: {e}"
-                    )
-                else:
-                    logger.error(f"Error fetching fundamentals for {symbol}: {e}")
+                self._handle_api_exception(e, f"fundamentals fetch for {symbol}")
                 continue
         
         return pd.DataFrame(records)
