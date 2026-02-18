@@ -7,6 +7,7 @@ import pandas as pd
 from typing import List, Dict, Optional
 import sys
 import os
+import re
 from datetime import datetime, date
 import time
 import traceback
@@ -788,7 +789,6 @@ def render_top5_summary_tab():
             
             # Fetch historical data for charts and predictions
             try:
-                import yfinance as yf
                 ticker = yf.Ticker(symbol)
                 hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
                 
@@ -1083,7 +1083,6 @@ def render_all_scenarios_tab():
                 # Download button
                 csv = result['results'].to_csv(index=False)
                 # Sanitize filename: replace non-alphanumeric chars with underscores
-                import re
                 safe_filename = re.sub(r'[^a-zA-Z0-9_-]', '_', result['scenario'])
                 st.download_button(
                     label=f"📥 Download {result['scenario']} (CSV)",
@@ -1116,7 +1115,6 @@ def render_all_scenarios_tab():
         
         if selected_symbol:
             try:
-                import yfinance as yf
                 ticker = yf.Ticker(selected_symbol)
                 hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
                 

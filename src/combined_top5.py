@@ -6,7 +6,11 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import yfinance as yf
 from typing import Callable, Dict, List, Optional
+
+# Constants
+SUPPORT_RESISTANCE_DAYS = 90
 
 
 def add_to_top5_aggregator(scan_label: str, top_df: pd.DataFrame, data_fetcher_fn: Callable):
@@ -170,7 +174,6 @@ def render_combined_top5_plot(default_lookback: int = 60):
     
     else:  # Individual Stock Analysis
         # Show detailed analysis for each selected symbol
-        import yfinance as yf
         
         for symbol in selected_symbols:
             if symbol not in st.session_state["top5_union"]:
@@ -222,13 +225,13 @@ def render_combined_top5_plot(default_lookback: int = 60):
                 ax1.plot(hist_display.index, hist_display['SMA_50'], label='SMA 50', linewidth=1.5, 
                         linestyle='--', alpha=0.7, color='#D62839')
                 
-                # Add support and resistance levels (90-day high/low)
-                resistance = hist_full.tail(90)['High'].max()
-                support = hist_full.tail(90)['Low'].min()
+                # Add support and resistance levels
+                resistance = hist_full.tail(SUPPORT_RESISTANCE_DAYS)['High'].max()
+                support = hist_full.tail(SUPPORT_RESISTANCE_DAYS)['Low'].min()
                 ax1.axhline(y=resistance, color='#D62839', linestyle=':', linewidth=1.5, 
-                           alpha=0.5, label=f'90d Resistance (${resistance:.2f})')
+                           alpha=0.5, label=f'{SUPPORT_RESISTANCE_DAYS}d Resistance (${resistance:.2f})')
                 ax1.axhline(y=support, color='#06A77D', linestyle=':', linewidth=1.5, 
-                           alpha=0.5, label=f'90d Support (${support:.2f})')
+                           alpha=0.5, label=f'{SUPPORT_RESISTANCE_DAYS}d Support (${support:.2f})')
                 
                 ax1.set_ylabel('Price ($)', fontsize=10)
                 ax1.set_title(f'{symbol} - Price with Support/Resistance & Moving Averages', 
