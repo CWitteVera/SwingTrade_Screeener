@@ -102,8 +102,9 @@ class FinancialDataNetSource(DataSource):
         
         # Log API key status (mask actual value)
         if api_key:
-            # Always show first 4 chars + fixed asterisks
-            masked_key = api_key[:4] + '****'
+            # Always show up to first 4 chars + fixed asterisks (handle short keys)
+            prefix_len = min(len(api_key), 4)
+            masked_key = api_key[:prefix_len] + '****'
             logger.debug(f"FINANCIALDATA_API_KEY found: {masked_key}")
         else:
             logger.debug("FINANCIALDATA_API_KEY not found in environment or Streamlit secrets")
