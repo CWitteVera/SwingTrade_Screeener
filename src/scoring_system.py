@@ -139,6 +139,50 @@ class StockScorer:
             return ((current_price - old_price) / old_price) * 100
         return 0.0
     
+    def calculate_volatility(self, prices: pd.Series, period: int = 20) -> float:
+        """
+        Calculate price volatility (standard deviation of returns)
+        
+        Args:
+            prices: Series of closing prices
+            period: Lookback period
+            
+        Returns:
+            Annualized volatility percentage
+        """
+        if len(prices) < period:
+            return 0.0
+        
+        returns = prices.pct_change().dropna()
+        if len(returns) < period:
+            return 0.0
+        
+        # Calculate standard deviation of returns and annualize
+        volatility = returns.tail(period).std() * np.sqrt(252) * 100
+        return volatility if not pd.isna(volatility) else 0.0
+    
+    def calculate_price_range(self, prices: pd.Series, period: int = 20) -> float:
+        """
+        Calculate price range (high-low spread as percentage of price)
+        
+        Args:
+            prices: Series of closing prices
+            period: Lookback period
+            
+        Returns:
+            Price range as percentage
+        """
+        if len(prices) < period:
+            return 0.0
+        
+        recent_prices = prices.tail(period)
+        high = recent_prices.max()
+        low = recent_prices.min()
+        
+        if low > 0:
+            return ((high - low) / low) * 100
+        return 0.0
+    
     def fetch_historical_data(self, symbol: str) -> pd.DataFrame:
         """
         Fetch historical OHLCV data for a symbol
@@ -196,6 +240,8 @@ class StockScorer:
         mas = self.calculate_moving_averages(prices)
         volume_ratio = self.calculate_volume_trend(volumes)
         momentum = self.calculate_price_momentum(prices)
+        volatility = self.calculate_volatility(prices)
+        price_range = self.calculate_price_range(prices)
         
         # Calculate individual scores (0-100 scale)
         scores = {}
@@ -247,6 +293,7 @@ class StockScorer:
             scores['volume'] = 30
         
         # Momentum Score (positive momentum = bullish, penalize negative)
+        # For flat ranges, we're more lenient on negative momentum
         if momentum > 5:
             scores['momentum'] = 100
         elif momentum > 2:
@@ -254,9 +301,10 @@ class StockScorer:
         elif momentum > 0:
             scores['momentum'] = 60
         elif momentum > -2:
-            scores['momentum'] = 30
+            # Flat to slightly negative - not as bad for consolidating stocks
+            scores['momentum'] = 40
         else:
-            scores['momentum'] = 0
+            scores['momentum'] = 10
         
         # Calculate composite score (weighted average)
         weights = {
@@ -268,6 +316,19 @@ class StockScorer:
         }
         
         composite_score = sum(scores[k] * weights[k] for k in scores.keys())
+        
+        # Flat Range Bonus: Identify stocks with low volatility and tight ranges
+        # that are oversold (RSI < 50) - these are ideal consolidation patterns
+        # like NEE and PFE that could break out
+        is_flat_range = (volatility < 30 and price_range < 15)  # Low volatility and tight range
+        is_oversold = rsi < 50
+        
+        if is_flat_range and is_oversold:
+            # Apply bonus for flat consolidating stocks that are oversold
+            # Tighter the range, higher the bonus (max 10 points)
+            range_tightness = max(0, 15 - price_range)  # 0-15 scale
+            flat_range_bonus = min(10, range_tightness * 0.67)  # Up to 10 points
+            composite_score = min(100, composite_score + flat_range_bonus)
         
         # Calculate probability of upward trend (sigmoid-like function)
         # Score ranges: 0-100, probability ranges: 0-100%
@@ -281,6 +342,8 @@ class StockScorer:
             'MACD_Histogram': round(macd_hist, 4),
             'Volume_Ratio': round(volume_ratio, 2),
             'Momentum_10d': round(momentum, 2),
+            'Volatility': round(volatility, 2),
+            'Price_Range_20d': round(price_range, 2),
             **{k: round(v, 2) for k, v in mas.items()}
         }
         
