@@ -38,8 +38,8 @@ st.set_page_config(
 # ============================================================================
 # CONSTANTS
 # ============================================================================
-DEFAULT_FORECAST_DAYS = 14  # Default forecast period for scoring (used in auto-run, adjustable in manual mode)
-DEFAULT_LOOKBACK_DAYS = 60  # Default lookback period for scoring analysis (both auto-run and manual modes)
+DEFAULT_FORECAST_DAYS = 14  # Default forecast period for scoring (auto-run uses this; manual mode allows slider adjustment)
+DEFAULT_LOOKBACK_DAYS = 60  # Lookback period for scoring analysis (used in both auto-run and manual modes)
 
 
 # ============================================================================
