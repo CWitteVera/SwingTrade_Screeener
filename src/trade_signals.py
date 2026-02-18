@@ -158,8 +158,18 @@ def suggest_entry_exit(
     pivots = detect_pivots(df, lookback=5)
     
     # Calculate 20-day average volume
-    avg_volume = df['Volume'].rolling(window=20).mean().iloc[-1] if 'Volume' in df.columns else 0
-    current_volume = df['Volume'].iloc[-1] if 'Volume' in df.columns else 0
+    if 'Volume' in df.columns and len(df) >= 20:
+        avg_volume = df['Volume'].rolling(window=20).mean().iloc[-1]
+        current_volume = df['Volume'].iloc[-1]
+        # Handle NaN values
+        if pd.isna(avg_volume):
+            avg_volume = 0
+        if pd.isna(current_volume):
+            current_volume = 0
+    else:
+        avg_volume = 0
+        current_volume = 0
+    
     volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
     
     # Initialize result

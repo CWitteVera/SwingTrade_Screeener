@@ -11,6 +11,7 @@ from datetime import datetime, date
 import time
 import traceback
 from dotenv import load_dotenv
+import yfinance as yf
 
 # Load environment variables from .env file if it exists
 # This should be called before importing any modules that use env vars
@@ -746,7 +747,6 @@ def run_automated_scenarios():
                         
                         if not top_stocks.empty:
                             # Add to Top 5 aggregator for combined visualization
-                            import yfinance as yf
                             scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
                             add_to_top5_aggregator(
                                 scan_label,
@@ -904,7 +904,6 @@ def run_automated_scenarios():
         
         if selected_symbol:
             try:
-                import yfinance as yf
                 ticker = yf.Ticker(selected_symbol)
                 hist_data = ticker.history(period="120d")
                 

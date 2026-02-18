@@ -46,8 +46,7 @@ def add_to_top5_aggregator(scan_label: str, top_df: pd.DataFrame, data_fetcher_f
                     # Skip if no data
                     continue
             except Exception as e:
-                # Skip if fetch fails
-                print(f"Failed to fetch data for {symbol}: {e}")
+                # Skip if fetch fails - silently ignore
                 continue
         else:
             # Add to source scans
