@@ -971,13 +971,20 @@ def main():
                 st.rerun()
         
         # Only execute the scan once per session unless manually refreshed
-        # This prevents UI widget state changes (like expanders, radio buttons) 
-        # from re-triggering the expensive scan operation
+        # This prevents UI widget state changes (like expanders, radio buttons in the
+        # combined top5 visualization) from re-triggering the scan operation
+        # Note: Results are stored in session_state and will persist across re-renders
         if 'auto_run_executed' not in st.session_state:
             run_automated_scenarios()
             st.session_state['auto_run_executed'] = True
         else:
-            run_automated_scenarios()
+            # Show cached results
+            st.subheader("🤖 Auto-Run Mode - Viewing Cached Results")
+            st.info("📦 Displaying cached results from previous scan. Click 'Refresh Scan' above to update.")
+            
+            # Render the combined top5 visualization (uses session_state)
+            st.markdown("---")
+            render_combined_top5_plot(default_lookback=60)
         
         st.markdown("---")
         st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode. Click 'Refresh Scan' to update results.")

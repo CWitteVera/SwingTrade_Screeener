@@ -293,7 +293,8 @@ class StockScorer:
             scores['volume'] = 30
         
         # Momentum Score (positive momentum = bullish, penalize negative)
-        # For flat ranges, we're more lenient on negative momentum
+        # For flat ranges, we're more lenient on negative momentum since
+        # consolidating stocks may have slight negative momentum before breakout
         if momentum > 5:
             scores['momentum'] = 100
         elif momentum > 2:
@@ -304,6 +305,8 @@ class StockScorer:
             # Flat to slightly negative - not as bad for consolidating stocks
             scores['momentum'] = 40
         else:
+            # Highly negative momentum - reduced penalty (was 0, now 10)
+            # to avoid completely excluding stocks in tight consolidation patterns
             scores['momentum'] = 10
         
         # Calculate composite score (weighted average)
@@ -320,6 +323,7 @@ class StockScorer:
         # Flat Range Bonus: Identify stocks with low volatility and tight ranges
         # that are oversold (RSI < 50) - these are ideal consolidation patterns
         # like NEE and PFE that could break out
+        # Thresholds: volatility < 30% (annualized), price_range < 15% of price
         is_flat_range = (volatility < 30 and price_range < 15)  # Low volatility and tight range
         is_oversold = rsi < 50
         
