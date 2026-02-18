@@ -38,8 +38,8 @@ st.set_page_config(
 # ============================================================================
 # CONSTANTS
 # ============================================================================
-DEFAULT_FORECAST_DAYS = 14  # Default forecast period for auto-run scoring
-DEFAULT_LOOKBACK_DAYS = 60  # Default lookback period for scoring analysis
+DEFAULT_FORECAST_DAYS = 14  # Default forecast period for scoring (used in auto-run, adjustable in manual mode)
+DEFAULT_LOOKBACK_DAYS = 60  # Default lookback period for scoring analysis (both auto-run and manual modes)
 
 
 # ============================================================================
@@ -757,7 +757,7 @@ def run_automated_scenarios():
                                 
                                 with st.expander(
                                     f"{rank_emoji[rank_idx]} **{symbol}** - Score: {score:.1f}/100 | Probability: {probability:.1f}%",
-                                    expanded=False  # Collapsed by default in auto-run for brevity
+                                    expanded=False  # Collapsed by default for brevity
                                 ):
                                     # Display metrics in columns
                                     col1, col2, col3, col4 = st.columns(4)
@@ -1516,7 +1516,7 @@ def main():
                 
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     # Initialize scorer and predictor
-                    scorer = StockScorer(lookback_days=60, forecast_days=forecast_days)
+                    scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=forecast_days)
                     predictor = PricePredictor(forecast_days=forecast_days)
                     visualizer = StockVisualizer()
                     
