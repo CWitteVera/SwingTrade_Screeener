@@ -183,6 +183,7 @@ def render_combined_top5_plot(default_lookback: int = 60):
             
             try:
                 # Fetch full historical data for indicators
+                # Note: We fetch 120 days which is sufficient for SUPPORT_RESISTANCE_DAYS (90) calculation
                 ticker = yf.Ticker(symbol)
                 hist_full = ticker.history(period="120d")
                 
