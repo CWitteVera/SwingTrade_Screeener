@@ -36,6 +36,13 @@ st.set_page_config(
 
 
 # ============================================================================
+# CONSTANTS
+# ============================================================================
+DEFAULT_FORECAST_DAYS = 14  # Default forecast period for auto-run scoring
+DEFAULT_LOOKBACK_DAYS = 60  # Default lookback period for scoring analysis
+
+
+# ============================================================================
 # DEBUG LOG FUNCTIONS FOR DEVELOPER MODE
 # ============================================================================
 
@@ -728,9 +735,8 @@ def run_automated_scenarios():
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     try:
                         # Initialize scorer and predictor
-                        forecast_days = 14  # Default forecast period for auto-run
-                        scorer = StockScorer(lookback_days=60, forecast_days=forecast_days)
-                        predictor = PricePredictor(forecast_days=forecast_days)
+                        scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=DEFAULT_FORECAST_DAYS)
+                        predictor = PricePredictor(forecast_days=DEFAULT_FORECAST_DAYS)
                         visualizer = StockVisualizer()
                         
                         # Score and rank stocks
