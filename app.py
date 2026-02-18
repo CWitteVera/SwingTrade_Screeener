@@ -730,7 +730,7 @@ def run_automated_scenarios():
                 # TOP 3 SCORING SYSTEM FOR AUTO-RUN
                 # ====================================================================
                 st.markdown("---")
-                st.markdown("#### 🏆 Top 3 Stocks by Upward Potential")
+                st.markdown("#### 🏆 Top 5 Stocks by Upward Potential")
                 
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     try:
@@ -740,7 +740,7 @@ def run_automated_scenarios():
                         visualizer = StockVisualizer()
                         
                         # Score and rank stocks
-                        top_stocks = scorer.rank_stocks(result['results'], top_n=3)
+                        top_stocks = scorer.rank_stocks(result['results'], top_n=5)
                         
                         if not top_stocks.empty:
                             # Display each top stock in an expander
@@ -752,7 +752,7 @@ def run_automated_scenarios():
                                 score_contributions = row.get('score_contributions', {})
                                 
                                 # Rank display
-                                rank_emoji = ["🥇", "🥈", "🥉"]
+                                rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
                                 rank_idx = list(top_stocks.index).index(idx)
                                 
                                 with st.expander(
@@ -1196,9 +1196,9 @@ def main():
         # ====================================================================
         st.subheader("5️⃣ Scoring & Ranking")
         enable_scoring = st.checkbox(
-            "Enable Top 3 Scoring System",
+            "Enable Top 5 Scoring System",
             value=True,
-            help="Score and rank stocks by probability of upward trend. Shows top 3 with detailed analysis and price predictions."
+            help="Score and rank stocks by probability of upward trend. Shows top 5 with detailed analysis and price predictions."
         )
         
         forecast_days = 14
@@ -1512,7 +1512,7 @@ def main():
             # ====================================================================
             if enable_scoring and filtered_count > 0:
                 st.markdown("---")
-                st.subheader("🏆 Top 3 Stocks by Upward Potential")
+                st.subheader("🏆 Top 5 Stocks by Upward Potential")
                 
                 with st.spinner("🔍 Analyzing stocks and calculating scores..."):
                     # Initialize scorer and predictor
@@ -1522,7 +1522,7 @@ def main():
                     
                     # Score and rank stocks
                     try:
-                        top_stocks = scorer.rank_stocks(results_df, top_n=3)
+                        top_stocks = scorer.rank_stocks(results_df, top_n=5)
                         
                         if not top_stocks.empty:
                             # Display each top stock in an expander
@@ -1534,7 +1534,7 @@ def main():
                                 score_contributions = row.get('score_contributions', {})
                                 
                                 # Rank display
-                                rank_emoji = ["🥇", "🥈", "🥉"]
+                                rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
                                 rank_idx = list(top_stocks.index).index(idx)
                                 
                                 with st.expander(
