@@ -8,6 +8,7 @@ import os
 import streamlit as st
 import logging
 from .base import DataSource
+from .symbol_utils import clean_symbols
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -99,6 +100,13 @@ class FinancialDataNetSource(DataSource):
             except (AttributeError, FileNotFoundError):
                 pass
         
+        # Log API key status (mask actual value)
+        if api_key:
+            masked_key = api_key[:4] + '*' * (len(api_key) - 4) if len(api_key) > 4 else '****'
+            logger.debug(f"FINANCIALDATA_API_KEY found: {masked_key}")
+        else:
+            logger.debug("FINANCIALDATA_API_KEY not found in environment or Streamlit secrets")
+        
         return api_key
     
     def get_name(self) -> str:
@@ -143,12 +151,22 @@ class FinancialDataNetSource(DataSource):
             symbols = [item.get('trading_symbol', '').upper() 
                       for item in symbols_data if item and item.get('trading_symbol')]
             
+            # Clean symbols before returning
+            symbols = clean_symbols(symbols)
+            
             # Apply limit and offset
             return symbols[offset:offset + limit]
             
         except Exception as e:
-            # Log error and return empty list
-            logger.error(f"Error fetching universe from financialdata.net: {e}")
+            # Check for 401 Unauthorized
+            if '401' in str(e) or 'Unauthorized' in str(e):
+                logger.error(
+                    f"401 Unauthorized error from FinancialData.Net API. "
+                    f"Please check your FINANCIALDATA_API_KEY and account permissions. "
+                    f"Error details: {e}"
+                )
+            else:
+                logger.error(f"Error fetching universe from financialdata.net: {e}")
             return []
     
     def get_quotes(self, symbols: List[str]) -> pd.DataFrame:
@@ -162,6 +180,12 @@ class FinancialDataNetSource(DataSource):
             DataFrame with symbol, price, volume columns
         """
         if not self.is_available() or not symbols:
+            return pd.DataFrame()
+        
+        # Clean symbols before making API call
+        symbols = clean_symbols(symbols)
+        
+        if not symbols:
             return pd.DataFrame()
         
         try:
@@ -189,7 +213,15 @@ class FinancialDataNetSource(DataSource):
             return pd.DataFrame(records)
             
         except Exception as e:
-            logger.error(f"Error fetching quotes from financialdata.net: {e}")
+            # Check for 401 Unauthorized
+            if '401' in str(e) or 'Unauthorized' in str(e):
+                logger.error(
+                    f"401 Unauthorized error from FinancialData.Net API. "
+                    f"Please check your FINANCIALDATA_API_KEY and account permissions. "
+                    f"Error details: {e}"
+                )
+            else:
+                logger.error(f"Error fetching quotes from financialdata.net: {e}")
             return pd.DataFrame()
     
     def get_ohlcv(self, symbols: List[str], interval: str = '1d', 
@@ -206,6 +238,12 @@ class FinancialDataNetSource(DataSource):
             Dictionary mapping symbol -> DataFrame with OHLC data
         """
         if not self.is_available() or not symbols:
+            return {}
+        
+        # Clean symbols before making API calls
+        symbols = clean_symbols(symbols)
+        
+        if not symbols:
             return {}
         
         result = {}
@@ -239,7 +277,15 @@ class FinancialDataNetSource(DataSource):
                 result[symbol] = df
                 
             except Exception as e:
-                logger.error(f"Error fetching OHLCV for {symbol}: {e}")
+                # Check for 401 Unauthorized
+                if '401' in str(e) or 'Unauthorized' in str(e):
+                    logger.error(
+                        f"401 Unauthorized error from FinancialData.Net API for {symbol}. "
+                        f"Please check your FINANCIALDATA_API_KEY and account permissions. "
+                        f"Error details: {e}"
+                    )
+                else:
+                    logger.error(f"Error fetching OHLCV for {symbol}: {e}")
                 continue
         
         return result
@@ -256,6 +302,12 @@ class FinancialDataNetSource(DataSource):
             DataFrame with requested fundamental fields
         """
         if not self.is_available() or not symbols:
+            return pd.DataFrame()
+        
+        # Clean symbols before making API calls
+        symbols = clean_symbols(symbols)
+        
+        if not symbols:
             return pd.DataFrame()
         
         records = []
@@ -284,7 +336,15 @@ class FinancialDataNetSource(DataSource):
                 records.append(record)
                 
             except Exception as e:
-                logger.error(f"Error fetching fundamentals for {symbol}: {e}")
+                # Check for 401 Unauthorized
+                if '401' in str(e) or 'Unauthorized' in str(e):
+                    logger.error(
+                        f"401 Unauthorized error from FinancialData.Net API for {symbol}. "
+                        f"Please check your FINANCIALDATA_API_KEY and account permissions. "
+                        f"Error details: {e}"
+                    )
+                else:
+                    logger.error(f"Error fetching fundamentals for {symbol}: {e}")
                 continue
         
         return pd.DataFrame(records)
