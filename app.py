@@ -25,6 +25,8 @@ from data_sources.financialdata_client import HAS_SDK
 from scoring_system import StockScorer
 from price_predictor import PricePredictor
 from visualizations import StockVisualizer
+from combined_top5 import add_to_top5_aggregator, render_combined_top5_plot
+from trade_signals import suggest_entry_exit
 
 
 # Page configuration
@@ -743,6 +745,15 @@ def run_automated_scenarios():
                         top_stocks = scorer.rank_stocks(result['results'], top_n=5)
                         
                         if not top_stocks.empty:
+                            # Add to Top 5 aggregator for combined visualization
+                            import yfinance as yf
+                            scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
+                            add_to_top5_aggregator(
+                                scan_label,
+                                top_stocks,
+                                lambda s: yf.Ticker(s).history(period="120d")
+                            )
+                            
                             # Display each top stock in an expander
                             for idx, row in top_stocks.iterrows():
                                 symbol = row['symbol']
@@ -875,6 +886,59 @@ def run_automated_scenarios():
         for result in failed_results:
             with st.expander(f"⚠️ {result['scenario']}", expanded=False):
                 st.error(f"**Error:** {result.get('error', 'Unknown error')}")
+    
+    # Render combined Top 5 visualization
+    render_combined_top5_plot(default_lookback=60)
+    
+    # Optional: Entry/Exit Suggestion Preview
+    if "top5_union" in st.session_state and st.session_state["top5_union"]:
+        st.markdown("---")
+        st.markdown("### 🎯 Entry/Exit Suggestions")
+        
+        available_symbols = list(st.session_state["top5_union"].keys())
+        selected_symbol = st.selectbox(
+            "Select a symbol to preview entry/exit suggestions:",
+            [""] + available_symbols,
+            help="Choose a symbol from the Top 5 union to see suggested entry, stop, and target levels"
+        )
+        
+        if selected_symbol:
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker(selected_symbol)
+                hist_data = ticker.history(period="120d")
+                
+                if not hist_data.empty:
+                    suggestion = suggest_entry_exit(hist_data)
+                    
+                    st.markdown(f"#### {selected_symbol} - {suggestion['strategy']}")
+                    
+                    if suggestion['entry'] is not None:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Entry", f"${suggestion['entry']:.2f}")
+                        with col2:
+                            st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
+                        with col3:
+                            st.metric("Target 1", f"${suggestion['target1']:.2f}")
+                        with col4:
+                            st.metric("Target 2", f"${suggestion['target2']:.2f}")
+                        
+                        st.info(f"**Confidence:** {suggestion['confidence']}")
+                        
+                        if suggestion['notes']:
+                            st.markdown("**Notes:**")
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                    else:
+                        st.warning(f"No clear entry/exit setup detected for {selected_symbol}")
+                        if suggestion['notes']:
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                else:
+                    st.warning(f"Unable to fetch historical data for {selected_symbol}")
+            except Exception as e:
+                st.error(f"Error generating suggestion: {str(e)}")
 
 
 def main():
