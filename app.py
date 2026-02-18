@@ -22,6 +22,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from universe_sets import get_universe_symbols
 from data_sources import YahooDataSource, AlpacaDataSource, FinancialDataNetSource
 from data_sources.financialdata_client import HAS_SDK
+from scoring_system import StockScorer
+from price_predictor import PricePredictor
+from visualizations import StockVisualizer
 
 
 # Page configuration
@@ -1053,6 +1056,30 @@ def main():
             )
             
             st.markdown("---")
+        
+        # ====================================================================
+        # SECTION 5️⃣: SCORING SYSTEM (NEW)
+        # ====================================================================
+        st.subheader("5️⃣ Scoring & Ranking")
+        enable_scoring = st.checkbox(
+            "Enable Top 3 Scoring System",
+            value=False,
+            help="Score and rank stocks by probability of upward trend. Shows top 3 with detailed analysis and price predictions."
+        )
+        
+        forecast_days = 14
+        if enable_scoring:
+            forecast_days = st.slider(
+                "Forecast Period (Days)",
+                min_value=7,
+                max_value=30,
+                value=14,
+                step=1,
+                help="Number of days to forecast for price predictions"
+            )
+            st.info("📊 The scoring system analyzes RSI, MACD, moving averages, volume, and momentum to rank stocks by upward potential.")
+        
+        st.markdown("---")
     
     # Main content area
     st.header("Results")
@@ -1345,6 +1372,133 @@ def main():
                 use_container_width=True,
                 hide_index=True
             )
+            
+            # ====================================================================
+            # TOP 3 SCORING SYSTEM
+            # ====================================================================
+            if enable_scoring and filtered_count > 0:
+                st.markdown("---")
+                st.subheader("🏆 Top 3 Stocks by Upward Potential")
+                
+                with st.spinner("🔍 Analyzing stocks and calculating scores..."):
+                    # Initialize scorer and predictor
+                    scorer = StockScorer(lookback_days=60, forecast_days=forecast_days)
+                    predictor = PricePredictor(forecast_days=forecast_days)
+                    visualizer = StockVisualizer()
+                    
+                    # Score and rank stocks
+                    try:
+                        top_stocks = scorer.rank_stocks(results_df, top_n=3)
+                        
+                        if not top_stocks.empty:
+                            # Display each top stock in an expander
+                            for idx, row in top_stocks.iterrows():
+                                symbol = row['symbol']
+                                score = row.get('score', 0)
+                                probability = row.get('probability', 0)
+                                indicators = row.get('indicators', {})
+                                score_contributions = row.get('score_contributions', {})
+                                
+                                # Rank display
+                                rank_emoji = ["🥇", "🥈", "🥉"]
+                                rank_idx = list(top_stocks.index).index(idx)
+                                
+                                with st.expander(
+                                    f"{rank_emoji[rank_idx]} **{symbol}** - Score: {score:.1f}/100 | Probability: {probability:.1f}%",
+                                    expanded=(rank_idx == 0)  # Expand first one by default
+                                ):
+                                    # Display metrics in columns
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    
+                                    with col1:
+                                        st.metric("Current Price", f"${row.get('price', 0):.2f}")
+                                    with col2:
+                                        st.metric("Composite Score", f"{score:.1f}/100")
+                                    with col3:
+                                        st.metric("Upward Probability", f"{probability:.1f}%")
+                                    with col4:
+                                        volume = row.get('volume', 0)
+                                        st.metric("Volume", format_volume(volume))
+                                    
+                                    # Fetch historical data for predictions
+                                    hist_data = scorer.fetch_historical_data(symbol)
+                                    
+                                    if not hist_data.empty:
+                                        # Price prediction
+                                        current_price = row.get('price', row.get('close', 0))
+                                        prediction = predictor.predict_price_range(symbol, current_price, hist_data)
+                                        
+                                        # Display prediction metrics
+                                        st.markdown("#### 📈 Price Forecast")
+                                        
+                                        col1, col2, col3 = st.columns(3)
+                                        with col1:
+                                            st.metric(
+                                                "Expected Target",
+                                                f"${prediction['predicted_price']:.2f}",
+                                                delta=f"{((prediction['predicted_price'] - current_price) / current_price * 100):.1f}%"
+                                            )
+                                        with col2:
+                                            st.metric(
+                                                "80% Confidence Range",
+                                                f"${prediction['confidence_80_low']:.2f} - ${prediction['confidence_80_high']:.2f}"
+                                            )
+                                        with col3:
+                                            st.metric(
+                                                "Volatility",
+                                                f"{prediction['volatility']:.1f}%",
+                                                help="Annualized historical volatility"
+                                            )
+                                        
+                                        # Generate and display chart
+                                        st.markdown("#### 📊 Visualization")
+                                        chart_img = visualizer.create_combined_chart(
+                                            symbol, 
+                                            {'score_contributions': score_contributions},
+                                            prediction,
+                                            hist_data
+                                        )
+                                        
+                                        if chart_img:
+                                            st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                        else:
+                                            st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                                    
+                                    # Indicator breakdown
+                                    st.markdown("#### 🔍 Contributing Indicators")
+                                    
+                                    if indicators:
+                                        # Create two columns for indicator display
+                                        col1, col2 = st.columns(2)
+                                        
+                                        indicator_items = list(indicators.items())
+                                        mid_point = len(indicator_items) // 2
+                                        
+                                        with col1:
+                                            for key, value in indicator_items[:mid_point]:
+                                                st.metric(key.replace('_', ' ').title(), f"{value}")
+                                        
+                                        with col2:
+                                            for key, value in indicator_items[mid_point:]:
+                                                st.metric(key.replace('_', ' ').title(), f"{value}")
+                                    
+                                    # Score breakdown
+                                    if score_contributions:
+                                        st.markdown("#### 📊 Score Breakdown")
+                                        score_df = pd.DataFrame([
+                                            {
+                                                'Indicator': k.replace('_score', '').replace('_', ' ').title(),
+                                                'Score': f"{v:.1f}/100"
+                                            }
+                                            for k, v in score_contributions.items()
+                                        ])
+                                        st.dataframe(score_df, use_container_width=True, hide_index=True)
+                        else:
+                            st.warning("⚠️ Unable to score stocks. Insufficient data for analysis.")
+                    
+                    except Exception as e:
+                        st.error(f"❌ Error during scoring: {str(e)}")
+                        st.info("This may be due to insufficient historical data. Try with different stocks.")
             
             # Download button
             csv = results_df.to_csv(index=False)
