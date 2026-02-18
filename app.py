@@ -513,14 +513,6 @@ def run_automated_scenarios():
             'custom_symbols': None
         },
         {
-            'name': 'S&P 500 - Penny Stocks (Yahoo)',
-            'source': 'Yahoo (EOD)',
-            'universe': 'S&P 500',
-            'min_price': 1.0,
-            'max_price': 10.0,
-            'custom_symbols': None
-        },
-        {
             'name': 'NASDAQ-100 - High Value (Yahoo)',
             'source': 'Yahoo (EOD)',
             'universe': 'NASDAQ-100',
@@ -656,6 +648,9 @@ def run_automated_scenarios():
     progress_bar.empty()
     status_text.empty()
     
+    # Store all results in session state for tab rendering
+    st.session_state['auto_run_all_results'] = all_results
+    
     # Display summary
     st.success(f"✅ Completed {total_scenarios} automated scenarios!")
     st.markdown("---")
@@ -750,6 +745,9 @@ def run_automated_scenarios():
                         top_stocks = scorer.rank_stocks(result['results'], top_n=5)
                         
                         if not top_stocks.empty:
+                            # Store top stocks in result for later use
+                            result['top_stocks_df'] = top_stocks
+                            
                             # Add to Top 5 aggregator for combined visualization
                             scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
                             add_to_top5_aggregator(
@@ -941,6 +939,228 @@ def run_automated_scenarios():
                 st.error(f"Error generating suggestion: {str(e)}")
 
 
+def render_top5_summary_tab():
+    """
+    Render the Top 5 Results tab with connection status, progress, and top stocks with entry/exit points
+    """
+    st.subheader("🏆 Top 5 Results Summary")
+    
+    # Connection Status
+    st.markdown("### 🔌 Connection Status")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        fdn_source = FinancialDataNetSource()
+        if fdn_source.is_available():
+            st.success("✅ FinancialData API Connected")
+        else:
+            st.warning("⚠️ FinancialData API Not configured")
+    
+    with col2:
+        alpaca_key = os.getenv('ALPACA_API_KEY')
+        alpaca_secret = os.getenv('ALPACA_API_SECRET')
+        if alpaca_key and alpaca_secret:
+            st.success("✅ Alpaca API Connected")
+        else:
+            st.info("ℹ️ Alpaca API Not configured")
+    
+    with col3:
+        st.success("✅ Yahoo Finance Ready")
+    
+    st.markdown("---")
+    
+    # Progress/Completion Status
+    if 'auto_run_all_results' in st.session_state:
+        all_results = st.session_state['auto_run_all_results']
+        total_scenarios = len(all_results)
+        successful = len([r for r in all_results if r['status'] == 'success'])
+        
+        st.markdown("### 📊 Screening Progress")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Scenarios", total_scenarios)
+        with col2:
+            st.metric("Successful", successful)
+        with col3:
+            completion_pct = (successful / total_scenarios * 100) if total_scenarios > 0 else 0
+            st.metric("Completion", f"{completion_pct:.0f}%")
+        
+        st.progress(completion_pct / 100)
+    else:
+        st.info("No screening data available. Click 'Refresh Scan' to run scenarios.")
+        return
+    
+    st.markdown("---")
+    
+    # Get top 5 stocks from union
+    if "top5_union" not in st.session_state or not st.session_state["top5_union"]:
+        st.warning("⚠️ No top stocks available from screening.")
+        return
+    
+    # Get all symbols with their scores from the top5 aggregator
+    # We need to reconstruct scores from session state
+    all_top_stocks = []
+    
+    if 'auto_run_all_results' in st.session_state:
+        for result in st.session_state['auto_run_all_results']:
+            if result.get('top_stocks_df') is not None and not result['top_stocks_df'].empty:
+                for _, row in result['top_stocks_df'].iterrows():
+                    all_top_stocks.append(row)
+    
+    if not all_top_stocks:
+        st.warning("⚠️ No scored stocks available.")
+        return
+    
+    # Convert to DataFrame and sort by score, get top 5
+    all_top_df = pd.DataFrame(all_top_stocks)
+    all_top_df = all_top_df.sort_values('score', ascending=False).drop_duplicates(subset=['symbol']).head(5)
+    
+    st.markdown("### 🎯 Top 5 Stocks with Entry/Exit Points")
+    st.info(f"Displaying top {len(all_top_df)} stocks ranked by upward potential across all screening scenarios.")
+    
+    # Display each stock
+    for idx, row in all_top_df.iterrows():
+        symbol = row['symbol']
+        score = row.get('score', 0)
+        probability = row.get('probability', 0)
+        
+        rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        rank_idx = list(all_top_df.index).index(idx)
+        
+        with st.expander(
+            f"{rank_emoji[rank_idx]} **{symbol}** - Score: {score:.1f}/100 | Probability: {probability:.1f}%",
+            expanded=(rank_idx == 0)
+        ):
+            # Basic metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Current Price", f"${row.get('price', 0):.2f}")
+            with col2:
+                st.metric("Composite Score", f"{score:.1f}/100")
+            with col3:
+                st.metric("Upward Probability", f"{probability:.1f}%")
+            
+            # Fetch entry/exit points
+            try:
+                import yfinance as yf
+                ticker = yf.Ticker(symbol)
+                hist_data = ticker.history(period="120d")
+                
+                if not hist_data.empty:
+                    suggestion = suggest_entry_exit(hist_data)
+                    
+                    st.markdown("#### 📈 Entry/Exit Strategy")
+                    st.markdown(f"**Strategy:** {suggestion['strategy']}")
+                    
+                    if suggestion['entry'] is not None:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Entry Point", f"${suggestion['entry']:.2f}")
+                        with col2:
+                            st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
+                        with col3:
+                            st.metric("Target 1", f"${suggestion['target1']:.2f}")
+                        with col4:
+                            st.metric("Target 2", f"${suggestion['target2']:.2f}")
+                        
+                        st.info(f"**Confidence:** {suggestion['confidence']}")
+                        
+                        if suggestion['notes']:
+                            st.markdown("**Notes:**")
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                    else:
+                        st.warning("No clear entry/exit setup detected")
+                        if suggestion['notes']:
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                else:
+                    st.warning(f"Unable to fetch historical data for {symbol}")
+            except Exception as e:
+                st.error(f"Error generating entry/exit suggestion: {str(e)}")
+
+
+def render_all_scenarios_tab():
+    """
+    Render the All Scenarios tab with detailed results from all screening scenarios
+    """
+    if 'auto_run_all_results' not in st.session_state:
+        st.info("No screening data available. Click 'Refresh Scan' to run scenarios.")
+        return
+    
+    all_results = st.session_state['auto_run_all_results']
+    
+    # Summary table
+    st.subheader("📊 Scenario Summary")
+    summary_data = []
+    for result in all_results:
+        summary_data.append({
+            'Scenario': result['scenario'],
+            'Status': '✅ Success' if result['status'] == 'success' else ('⚠️ No Results' if result['status'] == 'no_results' else '❌ Failed'),
+            'Source': result.get('source', 'N/A'),
+            'Universe': result.get('universe', 'N/A'),
+            'Price Range': result.get('price_range', 'N/A'),
+            'Results Found': result.get('results_count', 0)
+        })
+    
+    summary_df = pd.DataFrame(summary_data)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    
+    # Show detailed results for each successful scenario
+    st.markdown("---")
+    st.subheader("📈 Detailed Results")
+    
+    successful_results = [r for r in all_results if r['status'] == 'success' and not r['results'].empty]
+    
+    if not successful_results:
+        st.warning("⚠️ No scenarios returned results. This could be due to:")
+        st.markdown("""
+        - Restrictive price filters (try wider ranges)
+        - API connectivity issues
+        - Empty universe sets
+        - All stocks filtered out by price criteria
+        
+        **Recommendations:**
+        1. Check your API keys are configured correctly
+        2. Try running individual scenarios with broader price ranges
+        3. Enable Developer Mode to see detailed error logs
+        """)
+    else:
+        for result in successful_results:
+            with st.expander(f"🔍 {result['scenario']} - {result['results_count']} stocks found", expanded=False):
+                st.write(f"**Source:** {result['source']}")
+                st.write(f"**Universe:** {result['universe']}")
+                st.write(f"**Price Range:** {result['price_range']}")
+                
+                if result.get('is_fallback'):
+                    st.warning("⚠️ Using fallback data source (Yahoo Finance)")
+                
+                # Display results
+                display_df = result['results'].copy()
+                
+                # Format the dataframe
+                if 'price' in display_df.columns:
+                    display_df['price'] = display_df['price'].apply(lambda x: f"${x:,.2f}")
+                if 'volume' in display_df.columns:
+                    display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
+                if 'change' in display_df.columns:
+                    display_df['change'] = display_df['change'].apply(lambda x: f"${x:,.2f}")
+                if 'change_pct' in display_df.columns:
+                    display_df['change_pct'] = display_df['change_pct'].apply(lambda x: f"{x:+.2f}%")
+                
+                # Rename columns
+                column_mapping = {
+                    'symbol': 'Symbol',
+                    'price': 'Price',
+                    'volume': 'Volume',
+                    'change': 'Change ($)',
+                    'change_pct': 'Change (%)',
+                }
+                display_df = display_df.rename(columns={col: column_mapping.get(col, col) for col in display_df.columns})
+                
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+
 def main():
     """Main application"""
     # Initialize session state for scalability
@@ -977,13 +1197,21 @@ def main():
         if 'auto_run_executed' not in st.session_state:
             run_automated_scenarios()
             st.session_state['auto_run_executed'] = True
-        else:
-            # Show cached results
-            st.subheader("🤖 Auto-Run Mode - Viewing Cached Results")
-            st.info("📦 Displaying cached results from previous scan. Click 'Refresh Scan' above to update.")
-            
-            # Render the combined top5 visualization (uses session_state)
-            st.markdown("---")
+        
+        # Create tabs for organized display
+        tab1, tab2, tab3 = st.tabs([
+            "🏆 Top 5 Results",
+            "📊 All Scenarios",
+            "📈 Combined Visualization"
+        ])
+        
+        with tab1:
+            render_top5_summary_tab()
+        
+        with tab2:
+            render_all_scenarios_tab()
+        
+        with tab3:
             render_combined_top5_plot(default_lookback=60)
         
         st.markdown("---")

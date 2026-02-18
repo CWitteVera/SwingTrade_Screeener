@@ -205,11 +205,25 @@ class StockVisualizer:
         
         # If we have historical data, plot it
         if hist_data is not None and not hist_data.empty and len(hist_data) > 5:
-            recent_hist = hist_data.tail(30).copy()
+            recent_hist = hist_data.tail(90).copy()  # Use 90 days for resistance bands
             recent_hist['day'] = list(range(-len(recent_hist), 0))
-            ax1.plot(recent_hist['day'], recent_hist['Close'], 
+            
+            # Calculate 90-day resistance bands (upper and lower support)
+            resistance_90d_upper = recent_hist['High'].max()
+            support_90d_lower = recent_hist['Low'].min()
+            
+            # Plot historical price with last 30 days visible
+            display_hist = recent_hist.tail(30).copy()
+            display_hist['day'] = list(range(-len(display_hist), 0))
+            ax1.plot(display_hist['day'], display_hist['Close'], 
                     color='#2E86AB', linewidth=1.5, label='Historical')
             ax1.scatter([0], [current_price], color='#2E86AB', s=50, zorder=5)
+            
+            # Plot 90-day resistance bands
+            ax1.axhline(y=resistance_90d_upper, color='#D62839', linestyle='--', 
+                       linewidth=1.5, alpha=0.7, label=f'90d Resistance (${resistance_90d_upper:.2f})')
+            ax1.axhline(y=support_90d_lower, color='#06A77D', linestyle='--', 
+                       linewidth=1.5, alpha=0.7, label=f'90d Support (${support_90d_lower:.2f})')
         else:
             ax1.scatter([0], [current_price], color='#2E86AB', s=50, zorder=5, label='Current')
         
@@ -227,7 +241,7 @@ class StockVisualizer:
         ax1.set_xlabel('Days', fontsize=9)
         ax1.set_ylabel('Price ($)', fontsize=9)
         ax1.set_title(f'Price Forecast ({forecast_days} Days)', fontsize=10, fontweight='bold')
-        ax1.legend(loc='best', fontsize=7)
+        ax1.legend(loc='best', fontsize=6)  # Reduced font size to fit more items
         ax1.grid(True, alpha=0.3, linestyle='--')
         ax1.tick_params(labelsize=8)
         
