@@ -43,6 +43,8 @@ st.set_page_config(
 # ============================================================================
 DEFAULT_FORECAST_DAYS = 14  # Default forecast period for scoring (auto-run uses this; manual mode allows slider adjustment)
 DEFAULT_LOOKBACK_DAYS = 60  # Lookback period for scoring analysis (used in both auto-run and manual modes)
+HISTORICAL_DATA_PERIOD = "120d"  # Period for fetching historical data for analysis and charts
+TOP_STOCKS_LIMIT = 5  # Number of top stocks to display in summary
 
 
 # ============================================================================
@@ -753,7 +755,7 @@ def run_automated_scenarios():
                             add_to_top5_aggregator(
                                 scan_label,
                                 top_stocks,
-                                lambda s: yf.Ticker(s).history(period="120d")
+                                lambda s: yf.Ticker(s).history(period=HISTORICAL_DATA_PERIOD)
                             )
                             
                             # Display each top stock in an expander
@@ -904,7 +906,7 @@ def run_automated_scenarios():
         if selected_symbol:
             try:
                 ticker = yf.Ticker(selected_symbol)
-                hist_data = ticker.history(period="120d")
+                hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
                 
                 if not hist_data.empty:
                     suggestion = suggest_entry_exit(hist_data)
@@ -1013,10 +1015,10 @@ def render_top5_summary_tab():
     
     # Convert to DataFrame and sort by score, get top 5
     all_top_df = pd.DataFrame(all_top_stocks)
-    all_top_df = all_top_df.sort_values('score', ascending=False).drop_duplicates(subset=['symbol']).head(5)
+    all_top_df = all_top_df.sort_values('score', ascending=False).drop_duplicates(subset=['symbol']).head(TOP_STOCKS_LIMIT)
     
     st.markdown("### 🎯 Top 5 Stocks with Entry/Exit Points")
-    st.info(f"Displaying top {len(all_top_df)} stocks ranked by upward potential across all screening scenarios.")
+    st.info(f"Displaying top 5 stocks ranked by upward potential across all screening scenarios.")
     
     # Display each stock
     for idx, row in all_top_df.iterrows():
@@ -1044,7 +1046,7 @@ def render_top5_summary_tab():
             try:
                 import yfinance as yf
                 ticker = yf.Ticker(symbol)
-                hist_data = ticker.history(period="120d")
+                hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
                 
                 if not hist_data.empty:
                     suggestion = suggest_entry_exit(hist_data)
