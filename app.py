@@ -7,6 +7,7 @@ import pandas as pd
 from typing import List, Dict, Optional
 import sys
 import os
+import re
 from datetime import datetime, date
 import time
 import traceback
@@ -650,295 +651,34 @@ def run_automated_scenarios():
     progress_bar.empty()
     status_text.empty()
     
-    # Store all results in session state for tab rendering
-    st.session_state['auto_run_all_results'] = all_results
-    
-    # Display summary
-    st.success(f"✅ Completed {total_scenarios} automated scenarios!")
-    st.markdown("---")
-    
-    # Summary table
-    st.subheader("📊 Scenario Summary")
-    summary_data = []
-    for result in all_results:
-        summary_data.append({
-            'Scenario': result['scenario'],
-            'Status': '✅ Success' if result['status'] == 'success' else ('⚠️ No Results' if result['status'] == 'no_results' else '❌ Failed'),
-            'Source': result.get('source', 'N/A'),
-            'Universe': result.get('universe', 'N/A'),
-            'Price Range': result.get('price_range', 'N/A'),
-            'Results Found': result.get('results_count', 0)
-        })
-    
-    summary_df = pd.DataFrame(summary_data)
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    
-    # Render combined Top 5 visualization FIRST (before detailed results)
-    st.markdown("---")
-    render_combined_top5_plot(default_lookback=60)
-    
-    # Show detailed results for each successful scenario
-    st.markdown("---")
-    st.subheader("📈 Detailed Results")
-    
+    # Process scoring for successful results
     successful_results = [r for r in all_results if r['status'] == 'success' and not r['results'].empty]
     
-    if not successful_results:
-        st.warning("⚠️ No scenarios returned results. This could be due to:")
-        st.markdown("""
-        - Restrictive price filters (try wider ranges)
-        - API connectivity issues
-        - Empty universe sets
-        - All stocks filtered out by price criteria
-        
-        **Recommendations:**
-        1. Check your API keys are configured correctly
-        2. Try running individual scenarios with broader price ranges
-        3. Enable Developer Mode to see detailed error logs
-        """)
-    else:
-        for result in successful_results:
-            with st.expander(f"🔍 {result['scenario']} - {result['results_count']} stocks found", expanded=True):
-                st.write(f"**Source:** {result['source']}")
-                st.write(f"**Universe:** {result['universe']}")
-                st.write(f"**Price Range:** {result['price_range']}")
+    for result in successful_results:
+        try:
+            # Initialize scorer
+            scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=DEFAULT_FORECAST_DAYS)
+            
+            # Score and rank stocks
+            top_stocks = scorer.rank_stocks(result['results'], top_n=5)
+            
+            if not top_stocks.empty:
+                # Store top stocks in result for later use
+                result['top_stocks_df'] = top_stocks
                 
-                if result.get('is_fallback'):
-                    st.warning("⚠️ Using fallback data source (Yahoo Finance)")
-                
-                # Display results
-                display_df = result['results'].copy()
-                
-                # Format the dataframe
-                if 'price' in display_df.columns:
-                    display_df['price'] = display_df['price'].apply(lambda x: f"${x:,.2f}")
-                if 'volume' in display_df.columns:
-                    display_df['volume'] = display_df['volume'].apply(lambda x: f"{x:,}")
-                if 'change' in display_df.columns:
-                    display_df['change'] = display_df['change'].apply(lambda x: f"${x:,.2f}")
-                if 'change_pct' in display_df.columns:
-                    display_df['change_pct'] = display_df['change_pct'].apply(lambda x: f"{x:+.2f}%")
-                
-                # Rename columns
-                column_mapping = {
-                    'symbol': 'Symbol',
-                    'price': 'Price',
-                    'volume': 'Volume',
-                    'change': 'Change ($)',
-                    'change_pct': 'Change (%)',
-                }
-                display_df = display_df.rename(columns={col: column_mapping.get(col, col) for col in display_df.columns})
-                
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
-                
-                # TOP 3 SCORING SYSTEM FOR AUTO-RUN
-                # ====================================================================
-                st.markdown("---")
-                st.markdown("#### 🏆 Top 5 Stocks by Upward Potential")
-                
-                with st.spinner("🔍 Analyzing stocks and calculating scores..."):
-                    try:
-                        # Initialize scorer and predictor
-                        scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=DEFAULT_FORECAST_DAYS)
-                        predictor = PricePredictor(forecast_days=DEFAULT_FORECAST_DAYS)
-                        visualizer = StockVisualizer()
-                        
-                        # Score and rank stocks
-                        top_stocks = scorer.rank_stocks(result['results'], top_n=5)
-                        
-                        if not top_stocks.empty:
-                            # Store top stocks in result for later use
-                            result['top_stocks_df'] = top_stocks
-                            
-                            # Add to Top 5 aggregator for combined visualization
-                            scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
-                            add_to_top5_aggregator(
-                                scan_label,
-                                top_stocks,
-                                lambda s: yf.Ticker(s).history(period=HISTORICAL_DATA_PERIOD)
-                            )
-                            
-                            # Display each top stock in an expander
-                            for idx, row in top_stocks.iterrows():
-                                symbol = row['symbol']
-                                score = row.get('score', 0)
-                                probability = row.get('probability', 0)
-                                indicators = row.get('indicators', {})
-                                score_contributions = row.get('score_contributions', {})
-                                
-                                # Rank display
-                                rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-                                rank_idx = list(top_stocks.index).index(idx)
-                                
-                                with st.expander(
-                                    f"{rank_emoji[rank_idx]} **{symbol}** - Score: {score:.1f}/100 | Probability: {probability:.1f}%",
-                                    expanded=False  # Collapsed by default for brevity
-                                ):
-                                    # Display metrics in columns
-                                    col1, col2, col3, col4 = st.columns(4)
-                                    
-                                    with col1:
-                                        st.metric("Current Price", f"${row.get('price', 0):.2f}")
-                                    with col2:
-                                        st.metric("Composite Score", f"{score:.1f}/100")
-                                    with col3:
-                                        st.metric("Upward Probability", f"{probability:.1f}%")
-                                    with col4:
-                                        volume = row.get('volume', 0)
-                                        st.metric("Volume", format_volume(volume))
-                                    
-                                    # Fetch historical data for predictions
-                                    hist_data = scorer.fetch_historical_data(symbol)
-                                    
-                                    if not hist_data.empty:
-                                        # Price prediction
-                                        current_price = row.get('price', row.get('close', 0))
-                                        prediction = predictor.predict_price_range(symbol, current_price, hist_data)
-                                        
-                                        # Display prediction metrics
-                                        st.markdown("##### 📈 Price Forecast")
-                                        
-                                        col1, col2, col3 = st.columns(3)
-                                        with col1:
-                                            st.metric(
-                                                "Expected Target",
-                                                f"${prediction['predicted_price']:.2f}",
-                                                delta=f"{((prediction['predicted_price'] - current_price) / current_price * 100):.1f}%"
-                                            )
-                                        with col2:
-                                            st.metric(
-                                                "80% Confidence Range",
-                                                f"${prediction['confidence_80_low']:.2f} - ${prediction['confidence_80_high']:.2f}"
-                                            )
-                                        with col3:
-                                            st.metric(
-                                                "Volatility",
-                                                f"{prediction['volatility']:.1f}%",
-                                                help="Annualized historical volatility"
-                                            )
-                                        
-                                        # Generate and display chart
-                                        st.markdown("##### 📊 Visualization")
-                                        chart_img = visualizer.create_combined_chart(
-                                            symbol, 
-                                            {'score_contributions': score_contributions},
-                                            prediction,
-                                            hist_data
-                                        )
-                                        
-                                        if chart_img:
-                                            st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
-                                        else:
-                                            st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
-                                    
-                                    # Indicator breakdown
-                                    st.markdown("##### 🔍 Contributing Indicators")
-                                    
-                                    if indicators:
-                                        # Create two columns for indicator display
-                                        col1, col2 = st.columns(2)
-                                        
-                                        indicator_items = list(indicators.items())
-                                        mid_point = len(indicator_items) // 2
-                                        
-                                        with col1:
-                                            for key, value in indicator_items[:mid_point]:
-                                                st.metric(key.replace('_', ' ').title(), f"{value}")
-                                        
-                                        with col2:
-                                            for key, value in indicator_items[mid_point:]:
-                                                st.metric(key.replace('_', ' ').title(), f"{value}")
-                                    
-                                    # Score breakdown
-                                    if score_contributions:
-                                        st.markdown("##### 📊 Score Breakdown")
-                                        score_df = pd.DataFrame([
-                                            {
-                                                'Indicator': k.replace('_score', '').replace('_', ' ').title(),
-                                                'Score': f"{v:.1f}/100"
-                                            }
-                                            for k, v in score_contributions.items()
-                                        ])
-                                        st.dataframe(score_df, use_container_width=True, hide_index=True)
-                        else:
-                            st.warning("⚠️ Unable to score stocks. Insufficient data for analysis.")
-                    
-                    except Exception as e:
-                        st.error(f"❌ Error during scoring: {str(e)}")
-                        st.info("This may be due to insufficient historical data. Try with different stocks.")
-                
-                st.markdown("---")
-                
-                # Download button
-                csv = result['results'].to_csv(index=False)
-                # Sanitize filename: replace non-alphanumeric chars with underscores
-                import re
-                safe_filename = re.sub(r'[^a-zA-Z0-9_-]', '_', result['scenario'])
-                st.download_button(
-                    label=f"📥 Download {result['scenario']} (CSV)",
-                    data=csv,
-                    file_name=f"{safe_filename}_results.csv",
-                    mime="text/csv",
-                    key=f"download_{result['scenario']}"
+                # Add to Top 5 aggregator for combined visualization
+                scan_label = f"{result['universe']} | {result['source']} | {result['price_range']}"
+                add_to_top5_aggregator(
+                    scan_label,
+                    top_stocks,
+                    lambda s: yf.Ticker(s).history(period=HISTORICAL_DATA_PERIOD)
                 )
+        except Exception as e:
+            # Skip scoring if it fails for this result
+            continue
     
-    # Show failed scenarios if any
-    failed_results = [r for r in all_results if r['status'] == 'failed']
-    if failed_results:
-        st.markdown("---")
-        st.subheader("❌ Failed Scenarios")
-        for result in failed_results:
-            with st.expander(f"⚠️ {result['scenario']}", expanded=False):
-                st.error(f"**Error:** {result.get('error', 'Unknown error')}")
-    
-    # Optional: Entry/Exit Suggestion Preview
-    if "top5_union" in st.session_state and st.session_state["top5_union"]:
-        st.markdown("---")
-        st.markdown("### 🎯 Entry/Exit Suggestions")
-        
-        available_symbols = list(st.session_state["top5_union"].keys())
-        selected_symbol = st.selectbox(
-            "Select a symbol to preview entry/exit suggestions:",
-            [""] + available_symbols,
-            help="Choose a symbol from the Top 5 union to see suggested entry, stop, and target levels"
-        )
-        
-        if selected_symbol:
-            try:
-                ticker = yf.Ticker(selected_symbol)
-                hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
-                
-                if not hist_data.empty:
-                    suggestion = suggest_entry_exit(hist_data)
-                    
-                    st.markdown(f"#### {selected_symbol} - {suggestion['strategy']}")
-                    
-                    if suggestion['entry'] is not None:
-                        col1, col2, col3, col4 = st.columns(4)
-                        with col1:
-                            st.metric("Entry", f"${suggestion['entry']:.2f}")
-                        with col2:
-                            st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
-                        with col3:
-                            st.metric("Target 1", f"${suggestion['target1']:.2f}")
-                        with col4:
-                            st.metric("Target 2", f"${suggestion['target2']:.2f}")
-                        
-                        st.info(f"**Confidence:** {suggestion['confidence']}")
-                        
-                        if suggestion['notes']:
-                            st.markdown("**Notes:**")
-                            for note in suggestion['notes']:
-                                st.markdown(f"- {note}")
-                    else:
-                        st.warning(f"No clear entry/exit setup detected for {selected_symbol}")
-                        if suggestion['notes']:
-                            for note in suggestion['notes']:
-                                st.markdown(f"- {note}")
-                else:
-                    st.warning(f"Unable to fetch historical data for {selected_symbol}")
-            except Exception as e:
-                st.error(f"Error generating suggestion: {str(e)}")
+    # Store all results in session state for tab rendering
+    st.session_state['auto_run_all_results'] = all_results
 
 
 def render_top5_summary_tab():
@@ -1025,6 +765,8 @@ def render_top5_summary_tab():
         symbol = row['symbol']
         score = row.get('score', 0)
         probability = row.get('probability', 0)
+        score_contributions = row.get('score_contributions', {})
+        indicators = row.get('indicators', {})
         
         rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
         rank_idx = list(all_top_df.index).index(idx)
@@ -1034,21 +776,66 @@ def render_top5_summary_tab():
             expanded=(rank_idx == 0)
         ):
             # Basic metrics
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Current Price", f"${row.get('price', 0):.2f}")
             with col2:
                 st.metric("Composite Score", f"{score:.1f}/100")
             with col3:
                 st.metric("Upward Probability", f"{probability:.1f}%")
+            with col4:
+                volume = row.get('volume', 0)
+                st.metric("Volume", format_volume(volume))
             
-            # Fetch entry/exit points
+            # Fetch historical data for charts and predictions
             try:
-                import yfinance as yf
                 ticker = yf.Ticker(symbol)
                 hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
                 
                 if not hist_data.empty:
+                    # Price prediction
+                    current_price = row.get('price', row.get('close', 0))
+                    predictor = PricePredictor(forecast_days=DEFAULT_FORECAST_DAYS)
+                    prediction = predictor.predict_price_range(symbol, current_price, hist_data)
+                    
+                    # Display prediction metrics
+                    st.markdown("#### 📈 Price Forecast")
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric(
+                            "Expected Target",
+                            f"${prediction['predicted_price']:.2f}",
+                            delta=f"{((prediction['predicted_price'] - current_price) / current_price * 100):.1f}%"
+                        )
+                    with col2:
+                        st.metric(
+                            "80% Confidence Range",
+                            f"${prediction['confidence_80_low']:.2f} - ${prediction['confidence_80_high']:.2f}"
+                        )
+                    with col3:
+                        st.metric(
+                            "Volatility",
+                            f"{prediction['volatility']:.1f}%",
+                            help="Annualized historical volatility"
+                        )
+                    
+                    # Generate and display chart
+                    st.markdown("#### 📊 Visualization")
+                    visualizer = StockVisualizer()
+                    chart_img = visualizer.create_combined_chart(
+                        symbol, 
+                        {'score_contributions': score_contributions},
+                        prediction,
+                        hist_data
+                    )
+                    
+                    if chart_img:
+                        st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                    else:
+                        st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                    
+                    # Entry/Exit Strategy
                     suggestion = suggest_entry_exit(hist_data)
                     
                     st.markdown("#### 📈 Entry/Exit Strategy")
@@ -1076,10 +863,26 @@ def render_top5_summary_tab():
                         if suggestion['notes']:
                             for note in suggestion['notes']:
                                 st.markdown(f"- {note}")
+                    
+                    # Indicator breakdown
+                    if indicators:
+                        st.markdown("#### 🔍 Contributing Indicators")
+                        col1, col2 = st.columns(2)
+                        
+                        indicator_items = list(indicators.items())
+                        mid_point = len(indicator_items) // 2
+                        
+                        with col1:
+                            for key, value in indicator_items[:mid_point]:
+                                st.metric(key.replace('_', ' ').title(), f"{value}")
+                        
+                        with col2:
+                            for key, value in indicator_items[mid_point:]:
+                                st.metric(key.replace('_', ' ').title(), f"{value}")
                 else:
                     st.warning(f"Unable to fetch historical data for {symbol}")
             except Exception as e:
-                st.error(f"Error generating entry/exit suggestion: {str(e)}")
+                st.error(f"Error generating analysis: {str(e)}")
 
 
 def render_all_scenarios_tab():
@@ -1161,6 +964,191 @@ def render_all_scenarios_tab():
                 display_df = display_df.rename(columns={col: column_mapping.get(col, col) for col in display_df.columns})
                 
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
+                
+                # Display top 5 stocks with detailed analysis
+                if result.get('top_stocks_df') is not None and not result['top_stocks_df'].empty:
+                    st.markdown("---")
+                    st.markdown("#### 🏆 Top 5 Stocks by Upward Potential")
+                    
+                    top_stocks = result['top_stocks_df']
+                    predictor = PricePredictor(forecast_days=DEFAULT_FORECAST_DAYS)
+                    scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=DEFAULT_FORECAST_DAYS)
+                    visualizer = StockVisualizer()
+                    
+                    # Display each top stock in an expander
+                    for idx, row in top_stocks.iterrows():
+                        symbol = row['symbol']
+                        score = row.get('score', 0)
+                        probability = row.get('probability', 0)
+                        indicators = row.get('indicators', {})
+                        score_contributions = row.get('score_contributions', {})
+                        
+                        # Rank display
+                        rank_emoji = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+                        rank_idx = list(top_stocks.index).index(idx)
+                        
+                        with st.expander(
+                            f"{rank_emoji[rank_idx]} **{symbol}** - Score: {score:.1f}/100 | Probability: {probability:.1f}%",
+                            expanded=False
+                        ):
+                            # Display metrics in columns
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            with col1:
+                                st.metric("Current Price", f"${row.get('price', 0):.2f}")
+                            with col2:
+                                st.metric("Composite Score", f"{score:.1f}/100")
+                            with col3:
+                                st.metric("Upward Probability", f"{probability:.1f}%")
+                            with col4:
+                                volume = row.get('volume', 0)
+                                st.metric("Volume", format_volume(volume))
+                            
+                            # Fetch historical data for predictions
+                            hist_data = scorer.fetch_historical_data(symbol)
+                            
+                            if not hist_data.empty:
+                                # Price prediction
+                                current_price = row.get('price', row.get('close', 0))
+                                prediction = predictor.predict_price_range(symbol, current_price, hist_data)
+                                
+                                # Display prediction metrics
+                                st.markdown("##### 📈 Price Forecast")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric(
+                                        "Expected Target",
+                                        f"${prediction['predicted_price']:.2f}",
+                                        delta=f"{((prediction['predicted_price'] - current_price) / current_price * 100):.1f}%"
+                                    )
+                                with col2:
+                                    st.metric(
+                                        "80% Confidence Range",
+                                        f"${prediction['confidence_80_low']:.2f} - ${prediction['confidence_80_high']:.2f}"
+                                    )
+                                with col3:
+                                    st.metric(
+                                        "Volatility",
+                                        f"{prediction['volatility']:.1f}%",
+                                        help="Annualized historical volatility"
+                                    )
+                                
+                                # Generate and display chart
+                                st.markdown("##### 📊 Visualization")
+                                chart_img = visualizer.create_combined_chart(
+                                    symbol, 
+                                    {'score_contributions': score_contributions},
+                                    prediction,
+                                    hist_data
+                                )
+                                
+                                if chart_img:
+                                    st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                else:
+                                    st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                            
+                            # Indicator breakdown
+                            st.markdown("##### 🔍 Contributing Indicators")
+                            
+                            if indicators:
+                                # Create two columns for indicator display
+                                col1, col2 = st.columns(2)
+                                
+                                indicator_items = list(indicators.items())
+                                mid_point = len(indicator_items) // 2
+                                
+                                with col1:
+                                    for key, value in indicator_items[:mid_point]:
+                                        st.metric(key.replace('_', ' ').title(), f"{value}")
+                                
+                                with col2:
+                                    for key, value in indicator_items[mid_point:]:
+                                        st.metric(key.replace('_', ' ').title(), f"{value}")
+                            
+                            # Score breakdown
+                            if score_contributions:
+                                st.markdown("##### 📊 Score Breakdown")
+                                score_df = pd.DataFrame([
+                                    {
+                                        'Indicator': k.replace('_score', '').replace('_', ' ').title(),
+                                        'Score': f"{v:.1f}/100"
+                                    }
+                                    for k, v in score_contributions.items()
+                                ])
+                                st.dataframe(score_df, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                
+                # Download button
+                csv = result['results'].to_csv(index=False)
+                # Sanitize filename: replace non-alphanumeric chars with underscores
+                safe_filename = re.sub(r'[^a-zA-Z0-9_-]', '_', result['scenario'])
+                st.download_button(
+                    label=f"📥 Download {result['scenario']} (CSV)",
+                    data=csv,
+                    file_name=f"{safe_filename}_results.csv",
+                    mime="text/csv",
+                    key=f"download_{result['scenario']}"
+                )
+    
+    # Show failed scenarios if any
+    failed_results = [r for r in all_results if r['status'] == 'failed']
+    if failed_results:
+        st.markdown("---")
+        st.subheader("❌ Failed Scenarios")
+        for result in failed_results:
+            with st.expander(f"⚠️ {result['scenario']}", expanded=False):
+                st.error(f"**Error:** {result.get('error', 'Unknown error')}")
+    
+    # Entry/Exit Suggestions
+    if "top5_union" in st.session_state and st.session_state["top5_union"]:
+        st.markdown("---")
+        st.markdown("### 🎯 Entry/Exit Suggestions")
+        
+        available_symbols = list(st.session_state["top5_union"].keys())
+        selected_symbol = st.selectbox(
+            "Select a symbol to preview entry/exit suggestions:",
+            [""] + available_symbols,
+            help="Choose a symbol from the Top 5 union to see suggested entry, stop, and target levels"
+        )
+        
+        if selected_symbol:
+            try:
+                ticker = yf.Ticker(selected_symbol)
+                hist_data = ticker.history(period=HISTORICAL_DATA_PERIOD)
+                
+                if not hist_data.empty:
+                    suggestion = suggest_entry_exit(hist_data)
+                    
+                    st.markdown(f"#### {selected_symbol} - {suggestion['strategy']}")
+                    
+                    if suggestion['entry'] is not None:
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Entry", f"${suggestion['entry']:.2f}")
+                        with col2:
+                            st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
+                        with col3:
+                            st.metric("Target 1", f"${suggestion['target1']:.2f}")
+                        with col4:
+                            st.metric("Target 2", f"${suggestion['target2']:.2f}")
+                        
+                        st.info(f"**Confidence:** {suggestion['confidence']}")
+                        
+                        if suggestion['notes']:
+                            st.markdown("**Notes:**")
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                    else:
+                        st.warning(f"No clear entry/exit setup detected for {selected_symbol}")
+                        if suggestion['notes']:
+                            for note in suggestion['notes']:
+                                st.markdown(f"- {note}")
+                else:
+                    st.warning(f"Unable to fetch historical data for {selected_symbol}")
+            except Exception as e:
+                st.error(f"Error generating suggestion: {str(e)}")
 
 
 def main():
