@@ -676,6 +676,10 @@ def run_automated_scenarios():
     summary_df = pd.DataFrame(summary_data)
     st.dataframe(summary_df, use_container_width=True, hide_index=True)
     
+    # Render combined Top 5 visualization FIRST (before detailed results)
+    st.markdown("---")
+    render_combined_top5_plot(default_lookback=60)
+    
     # Show detailed results for each successful scenario
     st.markdown("---")
     st.subheader("📈 Detailed Results")
@@ -887,9 +891,6 @@ def run_automated_scenarios():
             with st.expander(f"⚠️ {result['scenario']}", expanded=False):
                 st.error(f"**Error:** {result.get('error', 'Unknown error')}")
     
-    # Render combined Top 5 visualization
-    render_combined_top5_plot(default_lookback=60)
-    
     # Optional: Entry/Exit Suggestion Preview
     if "top5_union" in st.session_state and st.session_state["top5_union"]:
         st.markdown("---")
@@ -955,13 +956,38 @@ def main():
         "🤖 Enable Auto-Run Mode",
         value=True,
         help="Automatically run through multiple screening scenarios without manual selection. "
-             "This will test various combinations of data sources, universes, and price ranges."
+             "This will test various combinations of data sources, universes, and price ranges.",
+        key="auto_run_mode_checkbox"
     )
     
     if auto_run_mode:
-        run_automated_scenarios()
+        # Add refresh button to manually trigger re-scan
+        col1, col2 = st.columns([6, 1])
+        with col2:
+            if st.button("🔄 Refresh Scan", help="Re-run all automated scenarios"):
+                # Clear the execution flag to force re-run
+                if 'auto_run_executed' in st.session_state:
+                    del st.session_state['auto_run_executed']
+                st.rerun()
+        
+        # Only execute the scan once per session unless manually refreshed
+        # This prevents UI widget state changes (like expanders, radio buttons in the
+        # combined top5 visualization) from re-triggering the scan operation
+        # Note: Results are stored in session_state and will persist across re-renders
+        if 'auto_run_executed' not in st.session_state:
+            run_automated_scenarios()
+            st.session_state['auto_run_executed'] = True
+        else:
+            # Show cached results
+            st.subheader("🤖 Auto-Run Mode - Viewing Cached Results")
+            st.info("📦 Displaying cached results from previous scan. Click 'Refresh Scan' above to update.")
+            
+            # Render the combined top5 visualization (uses session_state)
+            st.markdown("---")
+            render_combined_top5_plot(default_lookback=60)
+        
         st.markdown("---")
-        st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode.")
+        st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode. Click 'Refresh Scan' to update results.")
         return  # Exit early, don't show manual controls
     
     st.markdown("---")
