@@ -49,6 +49,31 @@ TOP_STOCKS_LIMIT = 5  # Number of top stocks to display in summary
 
 
 # ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def prepare_score_data_for_chart(indicators: Dict) -> Dict:
+    """
+    Helper function to prepare score data for technical analysis chart
+    
+    Args:
+        indicators: Dictionary of stock indicators
+        
+    Returns:
+        Dictionary formatted for technical chart visualization
+    """
+    return {
+        'support_resistance': {
+            'support': indicators.get('Support_90d', 0),
+            'resistance': indicators.get('Resistance_90d', 0),
+            'relative_position': indicators.get('Relative_Position', 0)
+        },
+        'indicators': indicators
+    }
+
+
+
+# ============================================================================
 # DEBUG LOG FUNCTIONS FOR DEVELOPER MODE
 # ============================================================================
 
@@ -839,14 +864,7 @@ def render_top5_summary_tab():
                     st.markdown("#### 📊 Technical Analysis")
                     
                     # Prepare score_data for the technical chart
-                    score_data_for_chart = {
-                        'support_resistance': {
-                            'support': indicators.get('Support_90d', 0),
-                            'resistance': indicators.get('Resistance_90d', 0),
-                            'relative_position': indicators.get('Relative_Position', 0)
-                        },
-                        'indicators': indicators
-                    }
+                    score_data_for_chart = prepare_score_data_for_chart(indicators)
                     
                     tech_chart_img = visualizer.create_technical_analysis_chart(
                         symbol,
@@ -1089,14 +1107,7 @@ def render_all_scenarios_tab():
                                 st.markdown("##### 📊 Technical Analysis")
                                 
                                 # Prepare score_data for the technical chart
-                                score_data_for_chart = {
-                                    'support_resistance': {
-                                        'support': indicators.get('Support_90d', 0),
-                                        'resistance': indicators.get('Resistance_90d', 0),
-                                        'relative_position': indicators.get('Relative_Position', 0)
-                                    },
-                                    'indicators': indicators
-                                }
+                                score_data_for_chart = prepare_score_data_for_chart(indicators)
                                 
                                 tech_chart_img = visualizer.create_technical_analysis_chart(
                                     symbol,
@@ -1983,14 +1994,7 @@ def main():
                                         st.markdown("#### 📊 Technical Analysis")
                                         
                                         # Prepare score_data for the technical chart
-                                        score_data_for_chart = {
-                                            'support_resistance': {
-                                                'support': indicators.get('Support_90d', 0),
-                                                'resistance': indicators.get('Resistance_90d', 0),
-                                                'relative_position': indicators.get('Relative_Position', 0)
-                                            },
-                                            'indicators': indicators
-                                        }
+                                        score_data_for_chart = prepare_score_data_for_chart(indicators)
                                         
                                         tech_chart_img = visualizer.create_technical_analysis_chart(
                                             symbol,

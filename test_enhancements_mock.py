@@ -87,7 +87,9 @@ def test_breakout_filters_with_mock_data():
     hist = create_mock_stock_data(days=120, base_price=100)
     
     # Simulate volume spike in recent days - boost it more
-    hist.loc[hist.index[-1:], 'Volume'] = hist['Volume'].iloc[-20:].mean() * 2.5
+    # Use 2.5x to ensure we exceed the 1.5x threshold with margin
+    MOCK_VOLUME_SPIKE_MULTIPLIER = 2.5
+    hist.loc[hist.index[-1:], 'Volume'] = hist['Volume'].iloc[-20:].mean() * MOCK_VOLUME_SPIKE_MULTIPLIER
     
     current_price = hist['Close'].iloc[-1]
     

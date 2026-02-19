@@ -372,7 +372,9 @@ class StockVisualizer:
         rsi_values = []
         for i in range(len(plot_data)):
             if i < 14:
-                rsi_values.append(50)  # Neutral for insufficient data
+                # Insufficient data for 14-period RSI calculation
+                # Use 50 as neutral midpoint (RSI scale is 0-100, 50 represents neutral momentum)
+                rsi_values.append(50)
             else:
                 prices_slice = plot_data['Close'].iloc[:i+1]
                 rsi_val = scorer.calculate_rsi(prices_slice, period=14)
@@ -404,6 +406,8 @@ class StockVisualizer:
         
         for i in range(len(plot_data)):
             if i < 26:
+                # Insufficient data for MACD calculation
+                # MACD uses 12-day and 26-day EMAs, so requires minimum 26 data points
                 macd_values.append(0)
                 signal_values.append(0)
                 histogram_values.append(0)

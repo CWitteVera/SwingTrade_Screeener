@@ -267,6 +267,12 @@ class StockScorer:
         filters['position_favorable'] = 0.4 <= relative_pos <= 0.7
         
         # Overall breakout signal (all filters must pass)
+        # Rationale: A true breakout requires confluence of multiple factors:
+        # - Volume spike confirms genuine interest (not just price movement)
+        # - RSI momentum ensures healthy upward trend without being overbought
+        # - MACD momentum confirms directional strength
+        # - Favorable position ensures room to run before hitting resistance
+        # All four must align for a high-confidence breakout signal
         filters['breakout_signal'] = all([
             filters['volume_spike'],
             filters['rsi_momentum'],
