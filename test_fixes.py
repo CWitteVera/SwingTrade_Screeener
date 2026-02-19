@@ -34,9 +34,10 @@ def test_support_resistance_not_matching():
         'Volume': [1000000 + np.random.randint(0, 500000) for _ in range(50)]
     }, index=dates)
     
-    support, resistance = scorer.calculate_support_resistance(hist_data, period=90)
+    support, resistance, days_used = scorer.calculate_support_resistance(hist_data, period=90)
     
     print(f"Historical data: {len(hist_data)} days")
+    print(f"Days used for calculation: {days_used}")
     print(f"Support: ${support:.2f}")
     print(f"Resistance: ${resistance:.2f}")
     
@@ -76,14 +77,14 @@ def test_minimum_data_requirement():
         'Low': [99 + i for i in range(29)]
     }, index=dates_29)
     
-    support_29, resistance_29 = scorer.calculate_support_resistance(hist_29, period=90)
+    support_29, resistance_29, days_29 = scorer.calculate_support_resistance(hist_29, period=90)
     
     print(f"\nWith 29 days of data:")
-    print(f"  Support: {support_29}, Resistance: {resistance_29}")
-    if support_29 == 0.0 and resistance_29 == 0.0:
-        print(f"  ✅ PASS: Returns (0.0, 0.0) for insufficient data")
+    print(f"  Support: {support_29}, Resistance: {resistance_29}, Days used: {days_29}")
+    if support_29 == 0.0 and resistance_29 == 0.0 and days_29 == 0:
+        print(f"  ✅ PASS: Returns (0.0, 0.0, 0) for insufficient data")
     else:
-        print(f"  ❌ FAIL: Should return (0.0, 0.0) for < 30 days")
+        print(f"  ❌ FAIL: Should return (0.0, 0.0, 0) for < 30 days")
         return False
     
     # Test with 30 days (sufficient)
@@ -94,11 +95,11 @@ def test_minimum_data_requirement():
         'Low': [99 + i for i in range(30)]
     }, index=dates_30)
     
-    support_30, resistance_30 = scorer.calculate_support_resistance(hist_30, period=90)
+    support_30, resistance_30, days_30 = scorer.calculate_support_resistance(hist_30, period=90)
     
     print(f"\nWith 30 days of data:")
-    print(f"  Support: {support_30:.2f}, Resistance: {resistance_30:.2f}")
-    if support_30 > 0 and resistance_30 > 0 and support_30 != resistance_30:
+    print(f"  Support: {support_30:.2f}, Resistance: {resistance_30:.2f}, Days used: {days_30}")
+    if support_30 > 0 and resistance_30 > 0 and support_30 != resistance_30 and days_30 == 30:
         print(f"  ✅ PASS: Returns valid support/resistance with 30+ days")
     else:
         print(f"  ❌ FAIL: Should return valid values for 30+ days")
@@ -174,9 +175,10 @@ def test_uses_available_data():
         'Low': [p - 2 for p in prices],
     }, index=dates)
     
-    support, resistance = scorer.calculate_support_resistance(hist_data, period=90)
+    support, resistance, days_used = scorer.calculate_support_resistance(hist_data, period=90)
     
     print(f"Data available: 60 days (requested: 90 days)")
+    print(f"Days used: {days_used}")
     print(f"Support: ${support:.2f}")
     print(f"Resistance: ${resistance:.2f}")
     
@@ -184,7 +186,7 @@ def test_uses_available_data():
     expected_support = min([p - 2 for p in prices])
     expected_resistance = max([p + 2 for p in prices])
     
-    if abs(support - expected_support) < 0.01 and abs(resistance - expected_resistance) < 0.01:
+    if abs(support - expected_support) < 0.01 and abs(resistance - expected_resistance) < 0.01 and days_used == 60:
         print(f"✅ PASS: Uses all available 60 days")
         print(f"  Expected support: ${expected_support:.2f}, Got: ${support:.2f}")
         print(f"  Expected resistance: ${expected_resistance:.2f}, Got: ${resistance:.2f}")

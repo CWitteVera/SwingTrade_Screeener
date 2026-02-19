@@ -28,7 +28,7 @@ def test_support_resistance():
         try:
             hist = scorer.fetch_historical_data(symbol)
             if not hist.empty:
-                support, resistance = scorer.calculate_support_resistance(hist, period=90)
+                support, resistance, days_used = scorer.calculate_support_resistance(hist, period=90)
                 current_price = hist['Close'].iloc[-1]
                 relative_pos = scorer.calculate_relative_position(current_price, support, resistance)
                 
@@ -72,7 +72,7 @@ def test_breakout_filters():
                 rsi = scorer.calculate_rsi(hist['Close'])
                 macd, macd_signal, macd_hist = scorer.calculate_macd(hist['Close'])
                 volume_ratio = scorer.calculate_volume_trend(hist['Volume'])
-                support, resistance = scorer.calculate_support_resistance(hist)
+                support, resistance, _ = scorer.calculate_support_resistance(hist)
                 
                 # Check filters
                 filters = scorer.check_breakout_filters(

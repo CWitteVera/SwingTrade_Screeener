@@ -51,7 +51,7 @@ def test_support_resistance_with_mock_data():
     print(f"  Price range: ${hist['Close'].min():.2f} - ${hist['Close'].max():.2f}")
     
     # Calculate support and resistance
-    support, resistance = scorer.calculate_support_resistance(hist, period=90)
+    support, resistance, days_used = scorer.calculate_support_resistance(hist, period=90)
     current_price = hist['Close'].iloc[-1]
     relative_pos = scorer.calculate_relative_position(current_price, support, resistance)
     
@@ -97,7 +97,7 @@ def test_breakout_filters_with_mock_data():
     rsi = scorer.calculate_rsi(hist['Close'])
     macd, macd_signal, macd_hist = scorer.calculate_macd(hist['Close'])
     volume_ratio = scorer.calculate_volume_trend(hist['Volume'])
-    support, resistance = scorer.calculate_support_resistance(hist)
+    support, resistance, _ = scorer.calculate_support_resistance(hist)
     
     print(f"\nIndicator values:")
     print(f"  RSI: {rsi:.1f}")
