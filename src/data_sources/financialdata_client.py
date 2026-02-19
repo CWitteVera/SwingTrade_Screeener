@@ -124,7 +124,13 @@ class FinancialDataNetSource(DataSource):
             logger.error(
                 f"401 Unauthorized error from FinancialData.Net API during {context}. "
                 f"Please check your FINANCIALDATA_API_KEY and account permissions. "
-                f"Error details: {e}"
+                f"Error details: {e}\n"
+                f"Troubleshooting steps:\n"
+                f"  1. Verify your .env file contains: FINANCIALDATA_API_KEY=your_actual_key\n"
+                f"  2. Confirm the API key is valid at https://financialdata.net/\n"
+                f"  3. Check your account subscription/permissions\n"
+                f"  4. Test with: curl \"https://financialdata.net/api/v1/stock-quotes"
+                f"?identifiers=AAPL&key=YOUR_API_KEY\""
             )
         else:
             logger.error(f"Error during {context}: {e}")
@@ -201,6 +207,11 @@ class FinancialDataNetSource(DataSource):
             return pd.DataFrame()
         
         try:
+            # Log symbol details for debugging
+            logger.debug(f"Symbol count: {len(symbols)}")
+            logger.debug(f"First 5 symbols: {symbols[:5]}")
+            logger.debug(f"Joined identifiers: {','.join(symbols)[:200]}")
+            
             # Fetch quotes using the SDK
             quotes_data = self.client.get_stock_quotes(identifiers=','.join(symbols))
             
@@ -380,6 +391,18 @@ class FinancialDataNetSource(DataSource):
         
         # Fetch quotes as the primary data source
         df = self.get_quotes(symbols)
+        
+        # If primary source returned no data, fall back to Yahoo Finance
+        if df.empty:
+            logger.warning(
+                "FinancialData.Net returned no data, falling back to Yahoo Finance. "
+                "Check API key validity and account status."
+            )
+            from .yahoo import YahooDataSource
+            yahoo_source = YahooDataSource()
+            df = yahoo_source.fetch_data(symbols)
+            df.attrs['is_fallback'] = True
+            return df
         
         # If selected fields include fundamentals, fetch and merge
         fundamental_fields = [f for f in self.selected_fields 
