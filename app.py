@@ -22,8 +22,7 @@ load_dotenv(override=False)  # Don't override existing environment variables
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from universe_sets import get_universe_symbols
-from data_sources import YahooDataSource, AlpacaDataSource, FinancialDataNetSource
-from data_sources.financialdata_client import HAS_SDK
+from data_sources import YahooDataSource, AlpacaDataSource
 from scoring_system import StockScorer
 from price_predictor import PricePredictor
 from visualizations import StockVisualizer
@@ -91,7 +90,6 @@ def init_debug_log():
             },
             'api_calls': {
                 'yahoo': 0,
-                'financialdata': 0,
                 'alpaca': 0
             },
             'timings': {},
@@ -200,7 +198,6 @@ def clear_debug_log():
         }
         st.session_state['debug_log']['api_calls'] = {
             'yahoo': 0,
-            'financialdata': 0,
             'alpaca': 0
         }
         st.session_state['debug_log']['timings'] = {}
@@ -372,8 +369,7 @@ def get_cached_universe_symbols(universe_set: str, custom_symbols_tuple: tuple =
 @st.cache_data(ttl=300)  # Cache for 5 minutes
 def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float, max_price: float,
                          alpaca_api_key: str = None, alpaca_api_secret: str = None, 
-                         alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50,
-                         financialdata_fields: tuple = (), financialdata_interval: str = '1d') -> tuple:
+                         alpaca_movers_type: str = "most_actives", alpaca_top_n: int = 50) -> tuple:
     """
     Fetch data and apply price filter with caching
     
@@ -381,7 +377,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     - Cache key includes: source_name, symbols, min_price, max_price, source-specific params
     - TTL: 5 minutes (reduces API calls when only slider moves)
     - When min_price/max_price change, cache is used if same values
-    - FinancialData.Net and Alpaca have additional internal caching
+    - Alpaca has additional internal caching
     
     Note: Cache logging happens inside this function. When cached, function doesn't execute,
     so cache misses are logged when function runs, but cache hits aren't tracked.
@@ -395,8 +391,6 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
         alpaca_api_secret: Alpaca API secret (optional)
         alpaca_movers_type: Type of movers list for Alpaca
         alpaca_top_n: Number of top movers to fetch
-        financialdata_fields: Tuple of additional fields for FinancialData.Net (tuple for hashable caching)
-        financialdata_interval: Timeframe for FinancialData.Net data
         
     Returns:
         Tuple of (filtered_df, fetched_count, missing_price_count, after_price_filter_count, 
@@ -421,11 +415,6 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     source_selection_start = time.time()
     if source_name == "Yahoo (EOD)":
         source = YahooDataSource()
-    elif source_name == "Advanced Data (financialdata.net)":
-        source = FinancialDataNetSource(
-            selected_fields=list(financialdata_fields),
-            interval=financialdata_interval
-        )
     else:  # Alpaca Movers (Intraday)
         source = AlpacaDataSource(
             api_key=alpaca_api_key,
@@ -440,9 +429,7 @@ def fetch_and_filter_data(source_name: str, symbols: List[str], min_price: float
     try:
         # Log API call
         provider_key = source_name.split()[0].lower()
-        if provider_key == 'advanced':
-            provider_key = 'financialdata'
-        elif provider_key not in ['yahoo', 'alpaca']:
+        if provider_key not in ['yahoo', 'alpaca']:
             provider_key = 'yahoo'
         log_api_call(provider_key)
         
@@ -557,28 +544,6 @@ def run_automated_scenarios():
             'custom_symbols': None
         }
     ]
-    
-    # Check if Advanced Data is available
-    fdn_source = FinancialDataNetSource()
-    if fdn_source.is_available():
-        scenarios.extend([
-            {
-                'name': 'S&P 500 - Swing Trades (Advanced)',
-                'source': 'Advanced Data (financialdata.net)',
-                'universe': 'S&P 500',
-                'min_price': 10.0,
-                'max_price': 200.0,
-                'custom_symbols': None
-            },
-            {
-                'name': 'NASDAQ-100 - Swing Trades (Advanced)',
-                'source': 'Advanced Data (financialdata.net)',
-                'universe': 'NASDAQ-100',
-                'min_price': 10.0,
-                'max_price': 200.0,
-                'custom_symbols': None
-            }
-        ])
     
     # Check if Alpaca is available
     alpaca_key = os.getenv('ALPACA_API_KEY')
@@ -714,16 +679,9 @@ def render_top5_summary_tab():
     
     # Connection Status
     st.markdown("### 🔌 Connection Status")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
-        fdn_source = FinancialDataNetSource()
-        if fdn_source.is_available():
-            st.success("✅ FinancialData API Connected")
-        else:
-            st.warning("⚠️ FinancialData API Not configured")
-    
-    with col2:
         alpaca_key = os.getenv('ALPACA_API_KEY')
         alpaca_secret = os.getenv('ALPACA_API_SECRET')
         if alpaca_key and alpaca_secret:
@@ -731,7 +689,7 @@ def render_top5_summary_tab():
         else:
             st.info("ℹ️ Alpaca API Not configured")
     
-    with col3:
+    with col2:
         st.success("✅ Yahoo Finance Ready")
     
     st.markdown("---")
@@ -845,50 +803,37 @@ def render_top5_summary_tab():
                             help="Annualized historical volatility"
                         )
                     
-                    # Generate and display chart
-                    st.markdown("#### 📊 Visualization")
+                    # Combined Visualization & Technical Analysis chart
+                    st.markdown("#### 📊 Visualization & Technical Analysis")
                     visualizer = StockVisualizer()
-                    chart_img = visualizer.create_combined_chart(
-                        symbol, 
+                    score_data_for_chart = prepare_score_data_for_chart(indicators)
+                    full_chart_img = visualizer.create_full_analysis_chart(
+                        symbol,
                         {'score_contributions': score_contributions},
                         prediction,
-                        hist_data
-                    )
-                    
-                    if chart_img:
-                        st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
-                    else:
-                        st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
-                    
-                    # Technical Analysis Chart with RSI, MACD, Volume
-                    st.markdown("#### 📊 Technical Analysis")
-                    
-                    # Prepare score_data for the technical chart
-                    score_data_for_chart = prepare_score_data_for_chart(indicators)
-                    
-                    tech_chart_img = visualizer.create_technical_analysis_chart(
-                        symbol,
                         score_data_for_chart,
                         hist_data
                     )
                     
-                    if tech_chart_img:
-                        st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                    if full_chart_img:
+                        st.markdown(f'<img src="{full_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                    else:
+                        st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                    
+                    # Display breakout filters if available
+                    breakout_filters = row.get('breakout_filters', {})
+                    if breakout_filters:
+                        st.markdown("##### 🚀 Breakout Signals")
+                        filter_cols = st.columns(5)
                         
-                        # Display breakout filters if available
-                        breakout_filters = row.get('breakout_filters', {})
-                        if breakout_filters:
-                            st.markdown("##### 🚀 Breakout Signals")
-                            filter_cols = st.columns(5)
-                            
-                            filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
-                            filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
-                            
-                            for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
-                                with filter_cols[i]:
-                                    value = breakout_filters.get(key, False)
-                                    emoji = "✅" if value else "❌"
-                                    st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
+                        filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                        filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                        
+                        for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                            with filter_cols[i]:
+                                value = breakout_filters.get(key, False)
+                                emoji = "✅" if value else "❌"
+                                st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
                     
                     # Entry/Exit Strategy
                     suggestion = suggest_entry_exit(hist_data)
@@ -1089,49 +1034,36 @@ def render_all_scenarios_tab():
                                         help="Annualized historical volatility"
                                     )
                                 
-                                # Generate and display chart
-                                st.markdown("##### 📊 Visualization")
-                                chart_img = visualizer.create_combined_chart(
-                                    symbol, 
+                                # Combined Visualization & Technical Analysis chart
+                                st.markdown("##### 📊 Visualization & Technical Analysis")
+                                score_data_for_chart = prepare_score_data_for_chart(indicators)
+                                full_chart_img = visualizer.create_full_analysis_chart(
+                                    symbol,
                                     {'score_contributions': score_contributions},
                                     prediction,
-                                    hist_data
-                                )
-                                
-                                if chart_img:
-                                    st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
-                                else:
-                                    st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
-                                
-                                # Technical Analysis Chart with RSI, MACD, Volume
-                                st.markdown("##### 📊 Technical Analysis")
-                                
-                                # Prepare score_data for the technical chart
-                                score_data_for_chart = prepare_score_data_for_chart(indicators)
-                                
-                                tech_chart_img = visualizer.create_technical_analysis_chart(
-                                    symbol,
                                     score_data_for_chart,
                                     hist_data
                                 )
                                 
-                                if tech_chart_img:
-                                    st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                if full_chart_img:
+                                    st.markdown(f'<img src="{full_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                else:
+                                    st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                                
+                                # Display breakout filters if available
+                                breakout_filters = row.get('breakout_filters', {})
+                                if breakout_filters:
+                                    st.markdown("###### 🚀 Breakout Signals")
+                                    filter_cols = st.columns(5)
                                     
-                                    # Display breakout filters if available
-                                    breakout_filters = row.get('breakout_filters', {})
-                                    if breakout_filters:
-                                        st.markdown("###### 🚀 Breakout Signals")
-                                        filter_cols = st.columns(5)
-                                        
-                                        filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
-                                        filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
-                                        
-                                        for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
-                                            with filter_cols[i]:
-                                                value = breakout_filters.get(key, False)
-                                                emoji = "✅" if value else "❌"
-                                                st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
+                                    filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                                    filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                                    
+                                    for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                                        with filter_cols[i]:
+                                            value = breakout_filters.get(key, False)
+                                            emoji = "✅" if value else "❌"
+                                            st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
                             
                             # Indicator breakdown
                             st.markdown("##### 🔍 Contributing Indicators")
@@ -1236,6 +1168,242 @@ def render_all_scenarios_tab():
                 st.error(f"Error generating suggestion: {str(e)}")
 
 
+def render_backtest_tab():
+    """
+    Render the Backtesting tab for testing and refining screening criteria
+    against historical data to measure predictive accuracy.
+    """
+    from datetime import timedelta
+
+    st.subheader("📉 Backtesting — Refine Your Screening Tools")
+    st.info(
+        "Simulate running the screener at a past date and measure how selected stocks "
+        "actually performed afterward. Use this to evaluate and tune your screening criteria."
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        backtest_symbols_input = st.text_area(
+            "Symbols to backtest (comma-separated):",
+            value="AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, NFLX",
+            help="Enter stock symbols to include in the backtest",
+            height=100
+        )
+
+    with col2:
+        period_options = {
+            "30 days ago": 30,
+            "60 days ago": 60,
+            "90 days ago": 90,
+            "6 months ago": 180,
+            "1 year ago": 365,
+        }
+        period_label = st.selectbox(
+            "Signal Date (simulate screener running):",
+            list(period_options.keys()),
+            index=1,
+            help="The hypothetical date when you would have run the screener"
+        )
+        lookback_days = period_options[period_label]
+
+        forward_window = st.slider(
+            "Forward Performance Window (days):",
+            min_value=5,
+            max_value=60,
+            value=14,
+            step=1,
+            help="How many days after the signal date to measure performance"
+        )
+
+        min_score_threshold = st.slider(
+            "Minimum Score Filter:",
+            min_value=0,
+            max_value=100,
+            value=0,
+            step=5,
+            help="Only include stocks that met this score threshold at the signal date"
+        )
+
+    run_bt = st.button("🚀 Run Backtest", type="primary", use_container_width=True)
+
+    if run_bt:
+        symbols = [s.strip().upper() for s in
+                   backtest_symbols_input.replace('\n', ',').split(',') if s.strip()]
+        if not symbols:
+            st.warning("⚠️ Please enter at least one symbol.")
+            return
+
+        total_days_needed = lookback_days + forward_window + 60  # extra buffer
+        scorer = StockScorer(lookback_days=DEFAULT_LOOKBACK_DAYS, forecast_days=forward_window)
+
+        results = []
+        progress = st.progress(0)
+        status = st.empty()
+
+        for i, symbol in enumerate(symbols):
+            status.text(f"Processing {symbol} ({i + 1}/{len(symbols)})...")
+            progress.progress((i + 1) / len(symbols))
+
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period=f"{total_days_needed}d")
+
+                if hist.empty or len(hist) < lookback_days + forward_window:
+                    results.append({
+                        'Symbol': symbol,
+                        'Signal Price': None,
+                        'Exit Price': None,
+                        'Return %': None,
+                        'Score': None,
+                        'Probability': None,
+                        'Regime': None,
+                        'Status': 'Insufficient Data'
+                    })
+                    continue
+
+                # Slice: signal history = everything except the last forward_window rows
+                signal_hist = hist.iloc[:-forward_window]
+                if len(signal_hist) < 20:
+                    results.append({
+                        'Symbol': symbol,
+                        'Signal Price': None,
+                        'Exit Price': None,
+                        'Return %': None,
+                        'Score': None,
+                        'Probability': None,
+                        'Regime': None,
+                        'Status': 'Insufficient Data'
+                    })
+                    continue
+
+                signal_price = float(signal_hist['Close'].iloc[-1])
+
+                # Score the stock using only signal-date data
+                score_result = scorer.score_stock_from_hist(symbol, signal_price, signal_hist)
+
+                # Actual price after forward_window trading days
+                exit_price = float(hist['Close'].iloc[-1])
+                pct_change = (exit_price - signal_price) / signal_price * 100
+
+                results.append({
+                    'Symbol': symbol,
+                    'Signal Price': round(signal_price, 2),
+                    'Exit Price': round(exit_price, 2),
+                    'Return %': round(pct_change, 2),
+                    'Score': round(score_result.get('score', 0), 1),
+                    'Probability': round(score_result.get('probability', 0), 1),
+                    'Regime': score_result.get('regime', 'N/A'),
+                    'Status': 'Success'
+                })
+
+            except Exception as e:
+                results.append({
+                    'Symbol': symbol,
+                    'Signal Price': None,
+                    'Exit Price': None,
+                    'Return %': None,
+                    'Score': None,
+                    'Probability': None,
+                    'Regime': None,
+                    'Status': f'Error: {str(e)}'
+                })
+
+        progress.empty()
+        status.empty()
+
+        success_rows = [r for r in results if r['Status'] == 'Success']
+        failed_rows = [r for r in results if r['Status'] != 'Success']
+
+        if not success_rows:
+            st.warning("⚠️ No successful backtest results. Check the symbols and try again.")
+        else:
+            df = pd.DataFrame(success_rows)
+
+            # Apply minimum score filter
+            if min_score_threshold > 0:
+                filtered_df = df[df['Score'] >= min_score_threshold].copy()
+                if filtered_df.empty:
+                    st.warning(
+                        f"No stocks met the minimum score of {min_score_threshold}. "
+                        "Showing all results instead."
+                    )
+                    filtered_df = df
+            else:
+                filtered_df = df
+
+            # Summary metrics
+            avg_return = filtered_df['Return %'].mean()
+            win_rate = (filtered_df['Return %'] > 0).mean() * 100
+            best_idx = filtered_df['Return %'].idxmax()
+            worst_idx = filtered_df['Return %'].idxmin()
+            best = filtered_df.loc[best_idx]
+            worst = filtered_df.loc[worst_idx]
+
+            st.markdown("### 📊 Backtest Summary")
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                st.metric("Signals Analyzed", len(filtered_df))
+            with c2:
+                st.metric(
+                    "Avg Return",
+                    f"{avg_return:.1f}%",
+                    delta=f"{avg_return:.1f}%",
+                    delta_color="normal"
+                )
+            with c3:
+                st.metric("Win Rate", f"{win_rate:.0f}%")
+            with c4:
+                st.metric(
+                    "Best Performer",
+                    best['Symbol'],
+                    delta=f"{best['Return %']:.1f}%"
+                )
+
+            # Score vs Return correlation
+            if len(filtered_df) >= 2:
+                corr = filtered_df[['Score', 'Return %']].corr().iloc[0, 1]
+                if abs(corr) >= 0.5:
+                    corr_msg = f"Strong correlation ({corr:.2f}) between score and return."
+                elif abs(corr) >= 0.25:
+                    corr_msg = f"Moderate correlation ({corr:.2f}) between score and return."
+                else:
+                    corr_msg = f"Weak correlation ({corr:.2f}) between score and return."
+                st.info(f"📈 **Predictive Power:** {corr_msg}")
+
+            st.markdown("### 📋 Detailed Results")
+            display_df = filtered_df.copy()
+            display_df['Signal Price'] = display_df['Signal Price'].apply(lambda x: f"${x:.2f}")
+            display_df['Exit Price'] = display_df['Exit Price'].apply(lambda x: f"${x:.2f}")
+            display_df['Return %'] = display_df['Return %'].apply(
+                lambda x: f"{x:+.1f}%"
+            )
+            display_df['Score'] = display_df['Score'].apply(lambda x: f"{x:.1f}/100")
+            display_df['Probability'] = display_df['Probability'].apply(lambda x: f"{x:.1f}%")
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            # Download
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Backtest Results (CSV)",
+                data=csv_data,
+                file_name=f"backtest_{period_label.replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+
+            # Worst performer note
+            st.caption(
+                f"Worst performer: {worst['Symbol']} ({worst['Return %']:+.1f}%) | "
+                f"Signal period: {period_label} | "
+                f"Forward window: {forward_window} days"
+            )
+
+        if failed_rows:
+            with st.expander(f"⚠️ {len(failed_rows)} symbol(s) with issues", expanded=False):
+                for r in failed_rows:
+                    st.write(f"**{r['Symbol']}**: {r['Status']}")
+
+
 def main():
     """Main application"""
     # Initialize session state for scalability
@@ -1274,10 +1442,11 @@ def main():
             st.session_state['auto_run_executed'] = True
         
         # Create tabs for organized display
-        tab1, tab2, tab3 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "🏆 Top 5 Results",
             "📊 All Scenarios",
-            "📈 Combined Visualization"
+            "📈 Combined Visualization",
+            "📉 Backtesting"
         ])
         
         with tab1:
@@ -1289,6 +1458,9 @@ def main():
         with tab3:
             render_combined_top5_plot(default_lookback=60)
         
+        with tab4:
+            render_backtest_tab()
+        
         st.markdown("---")
         st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode. Click 'Refresh Scan' to update results.")
         return  # Exit early, don't show manual controls
@@ -1299,19 +1471,9 @@ def main():
     # API STATUS DASHBOARD (Top of main area, before sidebar)
     # ========================================================================
     st.subheader("🔌 API Status Dashboard")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
-        # FinancialData API Status
-        fdn_source = FinancialDataNetSource()
-        if fdn_source.is_available():
-            st.success("✅ FinancialData API")
-            st.caption("Connected & Ready")
-        else:
-            st.warning("⚠️ FinancialData API")
-            st.caption("Not configured (fallback to Yahoo)")
-    
-    with col2:
         # Alpaca API Status
         alpaca_key = os.getenv('ALPACA_API_KEY')
         alpaca_secret = os.getenv('ALPACA_API_SECRET')
@@ -1322,7 +1484,7 @@ def main():
             st.info("ℹ️ Alpaca API")
             st.caption("Not configured (optional)")
     
-    with col3:
+    with col2:
         # Developer Mode Status
         dev_mode = st.session_state.get('debug_log', {}).get('enabled', False)
         if dev_mode:
@@ -1362,7 +1524,7 @@ def main():
         st.subheader("1️⃣ Data Source")
         source = st.radio(
             "Select data source:",
-            ["Yahoo (EOD)", "Advanced Data (financialdata.net)", "Alpaca Movers (Intraday)"],
+            ["Yahoo (EOD)", "Alpaca Movers (Intraday)"],
             index=0,
             help="Choose the data source for stock prices"
         )
@@ -1452,82 +1614,6 @@ def main():
         )
         
         st.markdown("---")
-        
-        # ====================================================================
-        # SECTION 4️⃣: TECHNICAL INDICATORS (for FinancialData)
-        # ====================================================================
-        financialdata_fields = []
-        financialdata_interval = '1d'
-        
-        if source == "Advanced Data (financialdata.net)":
-            st.subheader("4️⃣ Technical Indicators")
-            
-            # Check if API key is available and show detailed error if not
-            fdn_source = FinancialDataNetSource()
-            if not fdn_source.is_available():
-                st.error("⚠️ **FinancialData API Key Missing**\n\n"
-                        "The app will fall back to Yahoo Finance data.\n\n"
-                        "**To enable Advanced Data:**\n\n"
-                        "Add this to your `.env` file:\n"
-                        "```\n"
-                        "FINANCIALDATA_API_KEY=your_api_key_here\n"
-                        "```\n\n"
-                        "Get your API key from [FinancialData.Net](https://financialdata.net/)")
-                
-                # Debug expander
-                with st.expander("🔍 Debug Information", expanded=False):
-                    st.write("**SDK Status:**", "✅ Installed" if HAS_SDK else "❌ Not Installed")
-                    api_key = os.getenv('FINANCIALDATA_API_KEY')
-                    st.write("**API Key Found:**", "✅ Yes" if api_key else "❌ No")
-                    st.write("**Client Available:**", "✅ Yes" if fdn_source.client else "❌ No")
-            else:
-                st.success("ℹ️ **Advanced Data Active** - Select optional fields below")
-                
-                # Field selector - MOVED OUT of expander for direct access
-                st.markdown("**Technical Indicators:**")
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.checkbox("Relative Volume (10d)", key="fdn_relvol"):
-                        financialdata_fields.append("relative_volume_10d")
-                    if st.checkbox("RSI", key="fdn_rsi"):
-                        financialdata_fields.append("rsi")
-                    if st.checkbox("MACD", key="fdn_macd"):
-                        financialdata_fields.append("macd")
-                with col2:
-                    if st.checkbox("SMA 50", key="fdn_sma50"):
-                        financialdata_fields.append("sma_50")
-                    if st.checkbox("SMA 150", key="fdn_sma150"):
-                        financialdata_fields.append("sma_150")
-                    if st.checkbox("SMA 200", key="fdn_sma200"):
-                        financialdata_fields.append("sma_200")
-                
-                st.markdown("**Moving Averages:**")
-                ema_options = st.multiselect(
-                    "EMA Periods",
-                    options=["5", "10", "20", "50"],
-                    help="Select exponential moving average periods"
-                )
-                for period in ema_options:
-                    financialdata_fields.append(f"ema_{period}")
-                
-                st.markdown("**Fundamentals:**")
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.checkbox("P/E Ratio", key="fdn_pe"):
-                        financialdata_fields.append("pe_ratio")
-                with col2:
-                    if st.checkbox("EPS", key="fdn_eps"):
-                        financialdata_fields.append("eps")
-                
-                # Timeframe selector
-                financialdata_interval = st.selectbox(
-                    "Timeframe",
-                    options=["1d", "1h", "5m"],
-                    index=0,
-                    help="Select timeframe for OHLCV data"
-                )
-            
-            st.markdown("---")
         
         # Alpaca-specific configuration (environment-only approach)
         alpaca_api_key = None
@@ -1660,17 +1746,12 @@ def main():
             progress_bar.progress(50)
             
             # Fetch and filter data with diagnostic counts
-            # Convert financialdata_fields to tuple for hashable caching
-            financialdata_fields_tuple = tuple(financialdata_fields) if financialdata_fields else ()
-            
             results_df, fetched_count, missing_price_count, after_price_filter_count, truncated, is_fallback, error_info = fetch_and_filter_data(
                 source, symbols, min_price, max_price,
                 alpaca_api_key=alpaca_api_key,
                 alpaca_api_secret=alpaca_api_secret,
                 alpaca_movers_type=alpaca_movers_type,
-                alpaca_top_n=alpaca_top_n,
-                financialdata_fields=financialdata_fields_tuple,
-                financialdata_interval=financialdata_interval
+                alpaca_top_n=alpaca_top_n
             )
             
             # Step 3: Applying filters
@@ -1760,15 +1841,6 @@ def main():
                 badge_color = "green"
                 badge_text = "✅ Alpaca (Intraday)"
                 badge_help = "Real-time intraday data from Alpaca"
-        elif data_source == "Advanced Data (financialdata.net)":
-            if is_fallback:
-                badge_color = "orange"
-                badge_text = "⚠️ FinancialData.Net (Fallback to Yahoo)"
-                badge_help = "FinancialData.Net unavailable or missing API key, using Yahoo Finance as fallback"
-            else:
-                badge_color = "green"
-                badge_text = "✅ FinancialData.Net"
-                badge_help = "Advanced data with prices, fundamentals, and technicals from FinancialData.Net"
         else:
             badge_color = "gray"
             badge_text = f"📊 {data_source}"
@@ -1976,49 +2048,36 @@ def main():
                                                 help="Annualized historical volatility"
                                             )
                                         
-                                        # Generate and display chart
-                                        st.markdown("#### 📊 Visualization")
-                                        chart_img = visualizer.create_combined_chart(
-                                            symbol, 
+                                        # Combined Visualization & Technical Analysis chart
+                                        st.markdown("#### 📊 Visualization & Technical Analysis")
+                                        score_data_for_chart = prepare_score_data_for_chart(indicators)
+                                        full_chart_img = visualizer.create_full_analysis_chart(
+                                            symbol,
                                             {'score_contributions': score_contributions},
                                             prediction,
-                                            hist_data
-                                        )
-                                        
-                                        if chart_img:
-                                            st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
-                                        else:
-                                            st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
-                                        
-                                        # Technical Analysis Chart with RSI, MACD, Volume
-                                        st.markdown("#### 📊 Technical Analysis")
-                                        
-                                        # Prepare score_data for the technical chart
-                                        score_data_for_chart = prepare_score_data_for_chart(indicators)
-                                        
-                                        tech_chart_img = visualizer.create_technical_analysis_chart(
-                                            symbol,
                                             score_data_for_chart,
                                             hist_data
                                         )
                                         
-                                        if tech_chart_img:
-                                            st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                        if full_chart_img:
+                                            st.markdown(f'<img src="{full_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                        else:
+                                            st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                                        
+                                        # Display breakout filters if available
+                                        breakout_filters = row.get('breakout_filters', {})
+                                        if breakout_filters:
+                                            st.markdown("##### 🚀 Breakout Signals")
+                                            filter_cols = st.columns(5)
                                             
-                                            # Display breakout filters if available
-                                            breakout_filters = row.get('breakout_filters', {})
-                                            if breakout_filters:
-                                                st.markdown("##### 🚀 Breakout Signals")
-                                                filter_cols = st.columns(5)
-                                                
-                                                filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
-                                                filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
-                                                
-                                                for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
-                                                    with filter_cols[i]:
-                                                        value = breakout_filters.get(key, False)
-                                                        emoji = "✅" if value else "❌"
-                                                        st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
+                                            filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                                            filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                                            
+                                            for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                                                with filter_cols[i]:
+                                                    value = breakout_filters.get(key, False)
+                                                    emoji = "✅" if value else "❌"
+                                                    st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
                                     
                                     # Indicator breakdown
                                     st.markdown("#### 🔍 Contributing Indicators")

@@ -17,6 +17,13 @@ try:
 except ImportError:
     HAS_MATPLOTLIB = False
 
+try:
+    from scoring_system import StockScorer as _StockScorer
+    _HAS_SCORER = True
+except ImportError:
+    _HAS_SCORER = False
+    _StockScorer = None
+
 
 class StockVisualizer:
     """Create visualizations for stock analysis"""
@@ -365,8 +372,7 @@ class StockVisualizer:
         
         # --- RSI Chart ---
         # Calculate RSI for the plot data
-        from scoring_system import StockScorer
-        scorer = StockScorer()
+        scorer = _StockScorer() if _HAS_SCORER else None
         
         # Calculate RSI for each point
         rsi_values = []
@@ -449,4 +455,183 @@ class StockVisualizer:
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         
+        return f"data:image/png;base64,{img_base64}"
+
+    def create_full_analysis_chart(self, symbol: str, score_data: Dict,
+                                   prediction: Dict, tech_score_data: Dict,
+                                   hist_data: Optional[pd.DataFrame] = None) -> Optional[str]:
+        """
+        Create a unified chart combining price forecast, technical indicators,
+        volume, RSI, MACD, and indicator score breakdown in a single image.
+
+        Args:
+            symbol: Stock ticker symbol
+            score_data: Score data dict with score_contributions (for indicator bars)
+            prediction: Price prediction dictionary
+            tech_score_data: Score data dict with support_resistance and indicators
+            hist_data: Historical OHLCV data
+
+        Returns:
+            Base64-encoded PNG image or None if matplotlib not available
+        """
+        if not self.has_matplotlib or hist_data is None or hist_data.empty:
+            return None
+
+        scorer = _StockScorer() if _HAS_SCORER else None
+
+        # Use last 60 days for technical panels
+        plot_data = hist_data.tail(60).copy()
+        plot_data['day'] = range(len(plot_data))
+
+        # Build figure: 4 rows (price, volume, RSI, MACD) + right column for scores
+        fig = plt.figure(figsize=(16, 12))
+        gs = fig.add_gridspec(4, 2, width_ratios=[3, 1],
+                              height_ratios=[3, 1, 1, 1], hspace=0.35, wspace=0.3)
+
+        ax_price = fig.add_subplot(gs[0, 0])
+        ax_volume = fig.add_subplot(gs[1, 0], sharex=ax_price)
+        ax_rsi = fig.add_subplot(gs[2, 0], sharex=ax_price)
+        ax_macd = fig.add_subplot(gs[3, 0], sharex=ax_price)
+        ax_scores = fig.add_subplot(gs[:, 1])  # spans all 4 rows
+
+        # --- Price panel: history + forecast + support/resistance ---
+        current_price = prediction.get('current_price', plot_data['Close'].iloc[-1])
+        predicted_price = prediction.get('predicted_price', current_price)
+        forecast_days = prediction.get('forecast_days', 14)
+
+        # Historical price
+        ax_price.plot(plot_data['day'], plot_data['Close'],
+                      color='#2E86AB', linewidth=2, label='Price')
+
+        # Support and resistance
+        support_resistance = tech_score_data.get('support_resistance', {})
+        support = support_resistance.get('support', 0)
+        resistance = support_resistance.get('resistance', 0)
+        if support > 0:
+            ax_price.axhline(y=support, color='#06A77D', linestyle='--',
+                             linewidth=1.5, alpha=0.7, label=f'Support: ${support:.2f}')
+        if resistance > 0:
+            ax_price.axhline(y=resistance, color='#D62839', linestyle='--',
+                             linewidth=1.5, alpha=0.7, label=f'Resistance: ${resistance:.2f}')
+
+        # Forecast
+        last_day = plot_data['day'].iloc[-1]
+        forecast_x = [last_day, last_day + forecast_days]
+        conf_low = prediction.get('confidence_80_low', current_price * 0.97)
+        conf_high = prediction.get('confidence_80_high', current_price * 1.03)
+        ax_price.plot(forecast_x, [current_price, predicted_price],
+                      color='#A23B72', linewidth=2, linestyle='--', label='Forecast')
+        ax_price.fill_between(forecast_x, [current_price, conf_low],
+                              [current_price, conf_high],
+                              alpha=0.25, color='#A23B72', label='80% Conf.')
+        ax_price.scatter([last_day], [current_price],
+                         color='#A23B72', s=80, zorder=5, label=f'Current: ${current_price:.2f}')
+
+        ax_price.set_ylabel('Price ($)', fontsize=10, fontweight='bold')
+        ax_price.set_title(f'{symbol} — Technical Analysis & Price Forecast',
+                           fontsize=12, fontweight='bold')
+        ax_price.legend(loc='upper left', fontsize=7)
+        ax_price.grid(True, alpha=0.3, linestyle='--')
+        ax_price.tick_params(labelsize=9)
+
+        # --- Volume panel ---
+        avg_volume = plot_data['Volume'].mean()
+        vol_colors = ['#D62839' if v >= avg_volume * 1.5 else '#2E86AB'
+                      for v in plot_data['Volume']]
+        ax_volume.bar(plot_data['day'], plot_data['Volume'],
+                      color=vol_colors, alpha=0.7, width=0.8)
+        ax_volume.axhline(y=avg_volume * 1.5, color='#D62839', linestyle='--',
+                          linewidth=1.2, alpha=0.5, label='1.5× Avg Vol')
+        ax_volume.set_ylabel('Volume', fontsize=9, fontweight='bold')
+        ax_volume.legend(loc='upper left', fontsize=7)
+        ax_volume.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax_volume.tick_params(labelsize=8)
+        ax_volume.ticklabel_format(style='plain', axis='y')
+
+        # --- RSI panel ---
+        rsi_values = []
+        for i in range(len(plot_data)):
+            if i < 14:
+                rsi_values.append(50)
+            else:
+                rsi_val = scorer.calculate_rsi(plot_data['Close'].iloc[:i + 1], period=14)
+                rsi_values.append(rsi_val)
+        plot_data['RSI'] = rsi_values
+
+        ax_rsi.plot(plot_data['day'], plot_data['RSI'],
+                    color='#A23B72', linewidth=2, label='RSI')
+        ax_rsi.axhline(y=70, color='#D62839', linestyle='--', linewidth=1, alpha=0.5)
+        ax_rsi.axhline(y=30, color='#06A77D', linestyle='--', linewidth=1, alpha=0.5)
+        ax_rsi.fill_between(plot_data['day'], 70, 100, alpha=0.1, color='#D62839', label='Overbought')
+        ax_rsi.fill_between(plot_data['day'], 0, 30, alpha=0.1, color='#06A77D', label='Oversold')
+        ax_rsi.set_ylabel('RSI', fontsize=9, fontweight='bold')
+        ax_rsi.set_ylim(0, 100)
+        ax_rsi.legend(loc='upper left', fontsize=7)
+        ax_rsi.grid(True, alpha=0.3, linestyle='--')
+        ax_rsi.tick_params(labelsize=8)
+
+        # --- MACD panel ---
+        macd_vals, signal_vals, hist_vals = [], [], []
+        for i in range(len(plot_data)):
+            if i < 26:
+                macd_vals.append(0)
+                signal_vals.append(0)
+                hist_vals.append(0)
+            else:
+                m, s, h = scorer.calculate_macd(plot_data['Close'].iloc[:i + 1])
+                macd_vals.append(m)
+                signal_vals.append(s)
+                hist_vals.append(h)
+
+        plot_data['MACD'] = macd_vals
+        plot_data['MACD_Signal'] = signal_vals
+        plot_data['MACD_Hist'] = hist_vals
+
+        hist_colors = ['#06A77D' if h > 0 else '#D62839' for h in plot_data['MACD_Hist']]
+        ax_macd.bar(plot_data['day'], plot_data['MACD_Hist'],
+                    color=hist_colors, alpha=0.5, width=0.8, label='Histogram')
+        ax_macd.plot(plot_data['day'], plot_data['MACD'],
+                     color='#2E86AB', linewidth=1.5, label='MACD')
+        ax_macd.plot(plot_data['day'], plot_data['MACD_Signal'],
+                     color='#A23B72', linewidth=1.5, label='Signal')
+        ax_macd.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        ax_macd.set_ylabel('MACD', fontsize=9, fontweight='bold')
+        ax_macd.set_xlabel('Days', fontsize=9, fontweight='bold')
+        ax_macd.legend(loc='upper left', fontsize=7)
+        ax_macd.grid(True, alpha=0.3, linestyle='--')
+        ax_macd.tick_params(labelsize=8)
+
+        # --- Indicator score breakdown panel ---
+        score_contributions = score_data.get('score_contributions', {})
+        if score_contributions:
+            labels = [k.replace('_score', '').replace('_', ' ').title()
+                      for k in score_contributions]
+            values = list(score_contributions.values())
+            colors = ['#06A77D' if v >= 75 else '#F5B700' if v >= 50 else '#D62839'
+                      for v in values]
+            y_pos = np.arange(len(labels))
+            ax_scores.barh(y_pos, values, color=colors, alpha=0.8)
+            ax_scores.set_yticks(y_pos)
+            ax_scores.set_yticklabels(labels, fontsize=9)
+            ax_scores.set_xlabel('Score (0-100)', fontsize=9)
+            ax_scores.set_xlim(0, 100)
+            ax_scores.set_title('Indicator Scores', fontsize=10, fontweight='bold')
+            ax_scores.grid(True, axis='x', alpha=0.3, linestyle='--')
+            ax_scores.tick_params(labelsize=8)
+            for i, v in enumerate(values):
+                ax_scores.text(v + 2, i, f'{v:.1f}', va='center', fontsize=8, fontweight='bold')
+        else:
+            ax_scores.text(0.5, 0.5, 'No score data', ha='center', va='center',
+                           transform=ax_scores.transAxes, fontsize=10)
+            ax_scores.set_title('Indicator Scores', fontsize=10, fontweight='bold')
+
+        fig.subplots_adjust(left=0.07, right=0.97, top=0.95, bottom=0.08,
+                            hspace=0.35, wspace=0.3)
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+
         return f"data:image/png;base64,{img_base64}"
