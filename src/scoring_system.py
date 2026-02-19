@@ -183,6 +183,105 @@ class StockScorer:
             return ((high - low) / low) * 100
         return 0.0
     
+    def calculate_support_resistance(self, hist_data: pd.DataFrame, period: int = 90) -> Tuple[float, float]:
+        """
+        Calculate support and resistance levels based on historical price data
+        
+        Args:
+            hist_data: DataFrame with historical OHLC data
+            period: Lookback period for calculating levels (default 90 days)
+            
+        Returns:
+            Tuple of (support_level, resistance_level)
+        """
+        if hist_data.empty or len(hist_data) < period:
+            # Not enough data, return current price as both levels
+            if not hist_data.empty and 'Close' in hist_data.columns:
+                current = hist_data['Close'].iloc[-1]
+                return current, current
+            return 0.0, 0.0
+        
+        # Use last 'period' days
+        recent_data = hist_data.tail(period)
+        
+        # Support: minimum of low prices in period
+        support = recent_data['Low'].min() if 'Low' in recent_data.columns else recent_data['Close'].min()
+        
+        # Resistance: maximum of high prices in period
+        resistance = recent_data['High'].max() if 'High' in recent_data.columns else recent_data['Close'].max()
+        
+        return support, resistance
+    
+    def calculate_relative_position(self, current_price: float, support: float, resistance: float) -> float:
+        """
+        Calculate relative position of price between support and resistance
+        
+        Args:
+            current_price: Current stock price
+            support: Support level
+            resistance: Resistance level
+            
+        Returns:
+            Relative position (0.0 to 1.0, where 0 is at support and 1 is at resistance)
+        """
+        if resistance <= support or support <= 0:
+            return 0.5  # Neutral position if invalid levels
+        
+        position = (current_price - support) / (resistance - support)
+        
+        # Clamp to 0-1 range (though price can be outside support/resistance)
+        return max(0.0, min(1.0, position))
+    
+    def check_breakout_filters(self, current_price: float, support: float, resistance: float,
+                              volume_ratio: float, rsi: float, macd_hist: float, 
+                              macd: float, macd_signal: float) -> Dict[str, bool]:
+        """
+        Check if stock passes momentum and breakout filters
+        
+        Args:
+            current_price: Current stock price
+            support: Support level
+            resistance: Resistance level
+            volume_ratio: Current volume / average volume
+            rsi: RSI value
+            macd_hist: MACD histogram value
+            macd: MACD line value
+            macd_signal: MACD signal line value
+            
+        Returns:
+            Dictionary with filter results
+        """
+        filters = {}
+        
+        # Volume spike detection (1.5x average)
+        filters['volume_spike'] = volume_ratio >= 1.5
+        
+        # RSI momentum (50-70 range for upward momentum)
+        filters['rsi_momentum'] = 50 <= rsi <= 70
+        
+        # MACD momentum (histogram positive OR MACD crossing above signal)
+        filters['macd_momentum'] = macd_hist > 0 or macd > macd_signal
+        
+        # Relative position (40%-70% of support-resistance range)
+        relative_pos = self.calculate_relative_position(current_price, support, resistance)
+        filters['position_favorable'] = 0.4 <= relative_pos <= 0.7
+        
+        # Overall breakout signal (all filters must pass)
+        # Rationale: A true breakout requires confluence of multiple factors:
+        # - Volume spike confirms genuine interest (not just price movement)
+        # - RSI momentum ensures healthy upward trend without being overbought
+        # - MACD momentum confirms directional strength
+        # - Favorable position ensures room to run before hitting resistance
+        # All four must align for a high-confidence breakout signal
+        filters['breakout_signal'] = all([
+            filters['volume_spike'],
+            filters['rsi_momentum'],
+            filters['macd_momentum'],
+            filters['position_favorable']
+        ])
+        
+        return filters
+    
     def fetch_historical_data(self, symbol: str) -> pd.DataFrame:
         """
         Fetch historical OHLCV data for a symbol
@@ -242,6 +341,16 @@ class StockScorer:
         momentum = self.calculate_price_momentum(prices)
         volatility = self.calculate_volatility(prices)
         price_range = self.calculate_price_range(prices)
+        
+        # Calculate support and resistance levels
+        support, resistance = self.calculate_support_resistance(hist)
+        relative_position = self.calculate_relative_position(current_price, support, resistance)
+        
+        # Check breakout filters
+        breakout_filters = self.check_breakout_filters(
+            current_price, support, resistance, volume_ratio,
+            rsi, macd_hist, macd, macd_signal
+        )
         
         # Calculate individual scores (0-100 scale)
         scores = {}
@@ -348,6 +457,9 @@ class StockScorer:
             'Momentum_10d': round(momentum, 2),
             'Volatility': round(volatility, 2),
             'Price_Range_20d': round(price_range, 2),
+            'Support_90d': round(support, 2),
+            'Resistance_90d': round(resistance, 2),
+            'Relative_Position': round(relative_position, 3),
             **{k: round(v, 2) for k, v in mas.items()}
         }
         
@@ -362,7 +474,13 @@ class StockScorer:
             'probability': round(probability, 1),
             'indicators': indicators,
             'score_contributions': score_contributions,
-            'raw_scores': scores
+            'raw_scores': scores,
+            'breakout_filters': breakout_filters,
+            'support_resistance': {
+                'support': round(support, 2),
+                'resistance': round(resistance, 2),
+                'relative_position': round(relative_position, 3)
+            }
         }
     
     def rank_stocks(self, stocks_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:

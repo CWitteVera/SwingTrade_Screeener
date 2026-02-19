@@ -288,3 +288,165 @@ class StockVisualizer:
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         
         return f"data:image/png;base64,{img_base64}"
+    
+    def create_technical_analysis_chart(self, symbol: str, score_data: Dict, 
+                                       hist_data: Optional[pd.DataFrame] = None) -> Optional[str]:
+        """
+        Create a comprehensive technical analysis chart with price, volume, RSI, and MACD
+        
+        Args:
+            symbol: Stock ticker symbol
+            score_data: Score data dictionary with indicators
+            hist_data: Historical OHLCV data
+            
+        Returns:
+            Base64-encoded PNG image or None if matplotlib not available
+        """
+        if not self.has_matplotlib or hist_data is None or hist_data.empty:
+            return None
+        
+        # Create figure with 4 subplots (price, volume, RSI, MACD)
+        fig = plt.figure(figsize=(12, 10))
+        gs = fig.add_gridspec(4, 1, height_ratios=[3, 1, 1, 1], hspace=0.3)
+        
+        ax_price = fig.add_subplot(gs[0])
+        ax_volume = fig.add_subplot(gs[1], sharex=ax_price)
+        ax_rsi = fig.add_subplot(gs[2], sharex=ax_price)
+        ax_macd = fig.add_subplot(gs[3], sharex=ax_price)
+        
+        # Prepare data (use last 60 days for visibility)
+        plot_data = hist_data.tail(60).copy()
+        plot_data['day'] = range(len(plot_data))
+        
+        # Get support/resistance from score_data
+        support_resistance = score_data.get('support_resistance', {})
+        support = support_resistance.get('support', 0)
+        resistance = support_resistance.get('resistance', 0)
+        current_price = plot_data['Close'].iloc[-1] if not plot_data.empty else 0
+        
+        # --- Price Chart with Support/Resistance ---
+        ax_price.plot(plot_data['day'], plot_data['Close'], 
+                     color='#2E86AB', linewidth=2, label='Price')
+        
+        # Add support and resistance lines
+        if support > 0:
+            ax_price.axhline(y=support, color='#06A77D', linestyle='--', 
+                           linewidth=2, alpha=0.7, label=f'Support: ${support:.2f}')
+        if resistance > 0:
+            ax_price.axhline(y=resistance, color='#D62839', linestyle='--', 
+                           linewidth=2, alpha=0.7, label=f'Resistance: ${resistance:.2f}')
+        
+        # Highlight current price
+        ax_price.scatter([plot_data['day'].iloc[-1]], [current_price], 
+                        color='#A23B72', s=100, zorder=5, label=f'Current: ${current_price:.2f}')
+        
+        ax_price.set_ylabel('Price ($)', fontsize=10, fontweight='bold')
+        ax_price.set_title(f'{symbol} - Technical Analysis', fontsize=12, fontweight='bold')
+        ax_price.legend(loc='upper left', fontsize=9)
+        ax_price.grid(True, alpha=0.3, linestyle='--')
+        ax_price.tick_params(labelsize=9)
+        
+        # --- Volume Chart with Spike Highlighting ---
+        # Calculate average volume
+        avg_volume = plot_data['Volume'].mean()
+        volume_colors = ['#D62839' if v >= avg_volume * 1.5 else '#2E86AB' 
+                        for v in plot_data['Volume']]
+        
+        ax_volume.bar(plot_data['day'], plot_data['Volume'], 
+                     color=volume_colors, alpha=0.7, width=0.8)
+        ax_volume.axhline(y=avg_volume * 1.5, color='#D62839', linestyle='--', 
+                         linewidth=1.5, alpha=0.5, label='1.5x Avg Volume')
+        
+        ax_volume.set_ylabel('Volume', fontsize=10, fontweight='bold')
+        ax_volume.legend(loc='upper left', fontsize=8)
+        ax_volume.grid(True, alpha=0.3, linestyle='--', axis='y')
+        ax_volume.tick_params(labelsize=9)
+        ax_volume.ticklabel_format(style='plain', axis='y')
+        
+        # --- RSI Chart ---
+        # Calculate RSI for the plot data
+        from scoring_system import StockScorer
+        scorer = StockScorer()
+        
+        # Calculate RSI for each point
+        rsi_values = []
+        for i in range(len(plot_data)):
+            if i < 14:
+                # Insufficient data for 14-period RSI calculation
+                # Use 50 as neutral midpoint (RSI scale is 0-100, 50 represents neutral momentum)
+                rsi_values.append(50)
+            else:
+                prices_slice = plot_data['Close'].iloc[:i+1]
+                rsi_val = scorer.calculate_rsi(prices_slice, period=14)
+                rsi_values.append(rsi_val)
+        
+        plot_data['RSI'] = rsi_values
+        
+        ax_rsi.plot(plot_data['day'], plot_data['RSI'], 
+                   color='#A23B72', linewidth=2, label='RSI')
+        
+        # Add overbought/oversold zones
+        ax_rsi.axhline(y=70, color='#D62839', linestyle='--', linewidth=1, alpha=0.5)
+        ax_rsi.axhline(y=30, color='#06A77D', linestyle='--', linewidth=1, alpha=0.5)
+        ax_rsi.fill_between(plot_data['day'], 70, 100, alpha=0.1, color='#D62839', label='Overbought')
+        ax_rsi.fill_between(plot_data['day'], 0, 30, alpha=0.1, color='#06A77D', label='Oversold')
+        ax_rsi.fill_between(plot_data['day'], 50, 70, alpha=0.05, color='#F5B700', label='Momentum Zone')
+        
+        ax_rsi.set_ylabel('RSI', fontsize=10, fontweight='bold')
+        ax_rsi.set_ylim(0, 100)
+        ax_rsi.legend(loc='upper left', fontsize=8)
+        ax_rsi.grid(True, alpha=0.3, linestyle='--')
+        ax_rsi.tick_params(labelsize=9)
+        
+        # --- MACD Chart ---
+        # Calculate MACD for each point
+        macd_values = []
+        signal_values = []
+        histogram_values = []
+        
+        for i in range(len(plot_data)):
+            if i < 26:
+                # Insufficient data for MACD calculation
+                # MACD uses 12-day and 26-day EMAs, so requires minimum 26 data points
+                macd_values.append(0)
+                signal_values.append(0)
+                histogram_values.append(0)
+            else:
+                prices_slice = plot_data['Close'].iloc[:i+1]
+                macd, signal, hist = scorer.calculate_macd(prices_slice)
+                macd_values.append(macd)
+                signal_values.append(signal)
+                histogram_values.append(hist)
+        
+        plot_data['MACD'] = macd_values
+        plot_data['MACD_Signal'] = signal_values
+        plot_data['MACD_Hist'] = histogram_values
+        
+        # Plot MACD histogram
+        hist_colors = ['#06A77D' if h > 0 else '#D62839' for h in plot_data['MACD_Hist']]
+        ax_macd.bar(plot_data['day'], plot_data['MACD_Hist'], 
+                   color=hist_colors, alpha=0.5, width=0.8, label='MACD Histogram')
+        
+        # Plot MACD and Signal lines
+        ax_macd.plot(plot_data['day'], plot_data['MACD'], 
+                    color='#2E86AB', linewidth=1.5, label='MACD Line')
+        ax_macd.plot(plot_data['day'], plot_data['MACD_Signal'], 
+                    color='#A23B72', linewidth=1.5, label='Signal Line')
+        ax_macd.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.5)
+        
+        ax_macd.set_ylabel('MACD', fontsize=10, fontweight='bold')
+        ax_macd.set_xlabel('Days', fontsize=10, fontweight='bold')
+        ax_macd.legend(loc='upper left', fontsize=8)
+        ax_macd.grid(True, alpha=0.3, linestyle='--')
+        ax_macd.tick_params(labelsize=9)
+        
+        plt.tight_layout()
+        
+        # Convert to base64
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+        
+        return f"data:image/png;base64,{img_base64}"
