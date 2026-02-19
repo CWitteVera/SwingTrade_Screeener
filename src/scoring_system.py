@@ -183,6 +183,239 @@ class StockScorer:
             return ((high - low) / low) * 100
         return 0.0
     
+    def calculate_atr(self, hist_data: pd.DataFrame, period: int = 14) -> float:
+        """
+        Calculate Average True Range (ATR)
+
+        Args:
+            hist_data: DataFrame with OHLC data (must have 'High', 'Low', 'Close' columns)
+            period: ATR period (default: 14)
+
+        Returns:
+            ATR value or 0.0 if insufficient data
+        """
+        if not {'High', 'Low', 'Close'}.issubset(hist_data.columns) or len(hist_data) < period + 1:
+            return 0.0
+
+        high_low = hist_data['High'] - hist_data['Low']
+        high_close = np.abs(hist_data['High'] - hist_data['Close'].shift(1))
+        low_close = np.abs(hist_data['Low'] - hist_data['Close'].shift(1))
+
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        atr = true_range.rolling(window=period).mean().iloc[-1]
+
+        return atr if not pd.isna(atr) else 0.0
+
+    def detect_market_regime(self, current_price: float, sma20: float, sma50: float) -> str:
+        """
+        Detect market regime based on price and moving averages
+
+        Args:
+            current_price: Current stock price
+            sma20: 20-day simple moving average
+            sma50: 50-day simple moving average
+
+        Returns:
+            Regime string: 'uptrend', 'downtrend', or 'range'
+        """
+        if sma20 <= 0 or sma50 <= 0:
+            return 'range'
+
+        if current_price > sma50 and sma20 > sma50:
+            return 'uptrend'
+        elif current_price < sma50 and sma20 < sma50:
+            return 'downtrend'
+        else:
+            return 'range'
+
+    def _calculate_trend_score(self, current_price: float, mas: Dict,
+                               macd: float, macd_signal: float, momentum: float) -> float:
+        """
+        Calculate trend strength score (0-100)
+
+        Inputs: price vs SMA50, SMA20 vs SMA50, MACD direction, momentum
+
+        Args:
+            current_price: Current stock price
+            mas: Dictionary of moving averages (keys: 'SMA_20', 'SMA_50', etc.)
+            macd: MACD line value
+            macd_signal: MACD signal line value
+            momentum: 10-day price momentum percentage
+
+        Returns:
+            Trend score 0-100
+        """
+        score = 0.0
+
+        sma20 = mas.get('SMA_20', 0)
+        sma50 = mas.get('SMA_50', 0)
+
+        # Price vs SMA20 (20 points)
+        if sma20 > 0:
+            score += 20 if current_price > sma20 else 0
+
+        # Price vs SMA50 (20 points)
+        if sma50 > 0:
+            score += 20 if current_price > sma50 else 0
+
+        # SMA20 vs SMA50 alignment (20 points)
+        if sma20 > 0 and sma50 > 0:
+            score += 20 if sma20 > sma50 else 0
+
+        # MACD direction (20 points)
+        score += 20 if macd > macd_signal else 0
+
+        # Positive momentum (20 points)
+        if momentum > 5:
+            score += 20
+        elif momentum > 2:
+            score += 15
+        elif momentum > 0:
+            score += 10
+
+        return min(100.0, score)
+
+    def _calculate_entry_score(self, current_price: float, support: float, resistance: float,
+                               rsi: float, volume_ratio: float,
+                               entry: float, stop: float, target: float) -> float:
+        """
+        Calculate entry quality score (0-100) with penalties applied
+
+        Inputs: support/resistance distance, RSI pullback zone, volume expansion, R:R ratio
+
+        Args:
+            current_price: Current stock price
+            support: Support level
+            resistance: Resistance level
+            rsi: RSI value
+            volume_ratio: Current volume / average volume
+            entry: Suggested entry price
+            stop: Suggested stop-loss price
+            target: Suggested target price
+
+        Returns:
+            Entry score 0-100 (after penalties)
+        """
+        score = 0.0
+
+        # RSI pullback zone 40-55 is optimal for swing entry (25 points)
+        if 40 <= rsi <= 55:
+            score += 25
+        elif 35 <= rsi <= 60:
+            score += 15
+        elif rsi < 35:
+            score += 10  # Very oversold, potential reversal
+
+        # Position in support-resistance range (25 points)
+        # Closer to support = better entry
+        if resistance > support > 0:
+            rel_pos = (current_price - support) / (resistance - support)
+            if rel_pos < 0.30:
+                score += 25  # Near support - ideal entry
+            elif rel_pos < 0.50:
+                score += 20
+            elif rel_pos < 0.65:
+                score += 10
+            # Above 65%: no points (chasing price near resistance)
+
+        # Volume expansion confirms entry (25 points)
+        if volume_ratio > 1.5:
+            score += 25
+        elif volume_ratio > 1.2:
+            score += 18
+        elif volume_ratio > 1.0:
+            score += 10
+
+        # Risk/Reward ratio (25 points base, penalties applied below)
+        rr_ratio = 0.0
+        if entry > 0 and stop > 0 and target > 0 and entry > stop:
+            risk = entry - stop
+            reward = target - entry
+            if risk > 0:
+                rr_ratio = reward / risk
+                if rr_ratio >= 2.0:
+                    score += 25
+                elif rr_ratio >= 1.5:
+                    score += 20
+                elif rr_ratio >= 1.2:
+                    score += 10
+
+        # --- Penalties ---
+        # Resistance proximity penalty: within 3% of resistance is risky
+        if resistance > 0:
+            dist_to_resistance = (resistance - current_price) / current_price
+            if dist_to_resistance < 0.03:
+                score -= 20
+
+        # Poor R:R penalty
+        if rr_ratio > 0:
+            if rr_ratio < 1.2:
+                score -= 25
+            elif rr_ratio < 1.5:
+                score -= 15
+
+        return max(0.0, min(100.0, score))
+
+    def _calculate_confidence(self, trend_score: float, volume_ratio: float,
+                              volatility: float, rr_ratio: float) -> str:
+        """
+        Calculate qualitative confidence level based on signal quality
+
+        Args:
+            trend_score: Trend strength score (0-100)
+            volume_ratio: Volume ratio (current / average)
+            volatility: Annualized volatility percentage
+            rr_ratio: Risk/reward ratio
+
+        Returns:
+            Confidence level: 'low', 'medium', or 'high'
+        """
+        # Trend alignment (0-25)
+        trend_component = min(25.0, trend_score * 0.25)
+
+        # Volume confirmation (0-25)
+        if volume_ratio > 1.5:
+            volume_component = 25.0
+        elif volume_ratio > 1.2:
+            volume_component = 18.0
+        elif volume_ratio > 1.0:
+            volume_component = 10.0
+        else:
+            volume_component = 0.0
+
+        # Volatility stability (0-25): lower volatility = more confident
+        if volatility < 20:
+            vol_component = 25.0
+        elif volatility < 30:
+            vol_component = 18.0
+        elif volatility < 40:
+            vol_component = 10.0
+        else:
+            vol_component = 0.0  # High volatility reduces confidence
+
+        # R:R quality (0-25)
+        if rr_ratio >= 2.0:
+            rr_component = 25.0
+        elif rr_ratio >= 1.5:
+            rr_component = 18.0
+        elif rr_ratio >= 1.2:
+            rr_component = 10.0
+        else:
+            rr_component = 0.0
+
+        confidence_score = trend_component + volume_component + vol_component + rr_component
+
+        # High volatility penalty: extremely volatile stocks reduce confidence
+        if volatility > 40:
+            confidence_score -= 15
+
+        if confidence_score >= 65:
+            return 'high'
+        elif confidence_score >= 40:
+            return 'medium'
+        else:
+            return 'low'
+
     def calculate_support_resistance(self, hist_data: pd.DataFrame, period: int = 90) -> Tuple[float, float, int]:
         """
         Calculate support and resistance levels based on historical price data
@@ -313,18 +546,21 @@ class StockScorer:
     
     def score_stock(self, symbol: str, current_price: float) -> Dict:
         """
-        Calculate comprehensive score for a stock
-        
+        Calculate comprehensive score for a stock using separate trend and entry scores.
+
+        Composite score = 0.6 * trend_score + 0.4 * entry_score
+
         Args:
             symbol: Stock ticker symbol
             current_price: Current stock price
-            
+
         Returns:
-            Dictionary with score, probability, and indicator breakdown
+            Dictionary with score, probability, indicators, trend/entry breakdown,
+            regime, strategy_type, confidence, rr_ratio, and expected_return_pct
         """
         # Fetch historical data
         hist = self.fetch_historical_data(symbol)
-        
+
         if hist.empty or len(hist) < 20:
             return {
                 'symbol': symbol,
@@ -333,10 +569,10 @@ class StockScorer:
                 'indicators': {},
                 'error': 'Insufficient data'
             }
-        
+
         prices = hist['Close']
         volumes = hist['Volume']
-        
+
         # Calculate indicators
         rsi = self.calculate_rsi(prices)
         macd, macd_signal, macd_hist = self.calculate_macd(prices)
@@ -345,113 +581,104 @@ class StockScorer:
         momentum = self.calculate_price_momentum(prices)
         volatility = self.calculate_volatility(prices)
         price_range = self.calculate_price_range(prices)
-        
+        atr = self.calculate_atr(hist)
+
         # Calculate support and resistance levels
         support, resistance, data_quality_days = self.calculate_support_resistance(hist)
         relative_position = self.calculate_relative_position(current_price, support, resistance)
-        
-        # Check breakout filters
+
+        # Detect market regime
+        sma20 = mas.get('SMA_20', 0)
+        sma50 = mas.get('SMA_50', 0)
+        regime = self.detect_market_regime(current_price, sma20, sma50)
+
+        # Determine strategy type and compute entry/stop/target for R:R
+        if regime == 'uptrend' and 35 <= rsi <= 60 and sma20 > 0:
+            strategy_type = 'pullback_entry'
+            entry = sma20 * 1.02  # Entry near SMA20 on pullback
+            stop = (support - atr * 0.5) if (support > 0 and atr > 0) else current_price * 0.95
+            target = resistance if resistance > entry else entry + (entry - stop) * 2
+        elif current_price > (resistance * 0.99) and volume_ratio > 1.2 and resistance > 0:
+            strategy_type = 'breakout_entry'
+            entry = current_price
+            stop = (resistance - atr * 0.5) if atr > 0 else current_price * 0.95
+            target = resistance + (resistance - support) if support > 0 else current_price * 1.10
+        elif regime == 'range' and support > 0 and (current_price - support) / current_price < 0.05:
+            strategy_type = 'range_reversal'
+            entry = current_price
+            stop = (support - atr * 0.5) if atr > 0 else current_price * 0.95
+            target = resistance if resistance > entry else entry * 1.10
+        else:
+            strategy_type = 'no_setup'
+            entry = current_price
+            stop = (current_price - atr * 1.5) if atr > 0 else current_price * 0.95
+            target = (current_price + atr * 2.0) if atr > 0 else current_price * 1.10
+
+        # Calculate separate trend and entry scores
+        trend_score = self._calculate_trend_score(current_price, mas, macd, macd_signal, momentum)
+        entry_score = self._calculate_entry_score(
+            current_price, support, resistance, rsi, volume_ratio, entry, stop, target
+        )
+
+        # Composite score: 60% trend + 40% entry
+        composite_score = 0.6 * trend_score + 0.4 * entry_score
+
+        # --- Forecast direction alignment ---
+        # Calculate expected return based on regime and trend
+        if atr > 0:
+            if regime == 'uptrend' and trend_score > 60:
+                expected_target = current_price + atr * 2.0
+            elif regime == 'downtrend':
+                expected_target = current_price - atr * 2.0
+            else:
+                # Range: use midpoint as mean-reversion target
+                midpoint = (support + resistance) / 2 if (support > 0 and resistance > 0) else current_price
+                expected_target = midpoint
+        else:
+            expected_target = current_price * (1 + momentum / 100)
+
+        expected_return_pct = ((expected_target - current_price) / current_price * 100) if current_price > 0 else 0
+
+        # Penalize if forecast is bearish in an uptrend regime while composite score is bullish.
+        # Only applied in uptrend to avoid double-penalizing downtrend stocks.
+        if regime == 'uptrend' and expected_return_pct < 0 and composite_score > 50:
+            composite_score = max(0, composite_score - 20)
+
+        # Flat Range Bonus: low-volatility consolidation patterns near support
+        is_flat_range = (volatility < 30 and price_range < 15)
+        is_oversold = rsi < 50
+        if is_flat_range and is_oversold:
+            range_tightness = max(0, 15 - price_range)
+            flat_range_bonus = min(10, range_tightness * 0.67)
+            composite_score = min(100, composite_score + flat_range_bonus)
+
+        # Volatility filter: high volatility reduces entry_score (and therefore composite_score)
+        if volatility > 40:
+            entry_score = max(0, entry_score - 15)
+
+        # Compute R:R ratio for output
+        rr_ratio = 0.0
+        if entry > stop > 0 and target > entry:
+            risk = entry - stop
+            reward = target - entry
+            if risk > 0:
+                rr_ratio = reward / risk
+
+        # Sigmoid-based probability: maps composite_score to realistic probability range ~50%-95%
+        sigmoid_input = (composite_score / 100.0) * 3.0
+        probability = (1.0 / (1.0 + np.exp(-sigmoid_input))) * 100.0
+        probability = min(100.0, max(0.0, probability))
+
+        # Confidence level based on signal quality
+        confidence = self._calculate_confidence(trend_score, volume_ratio, volatility, rr_ratio)
+
+        # Check breakout filters (legacy, for backwards compatibility)
         breakout_filters = self.check_breakout_filters(
             current_price, support, resistance, volume_ratio,
             rsi, macd_hist, macd, macd_signal
         )
-        
-        # Calculate individual scores (0-100 scale)
-        scores = {}
-        
-        # RSI Score (oversold = bullish, overbought = bearish)
-        # Optimal range: 30-70, with 40-60 being most bullish for swing trading
-        if rsi < 30:
-            scores['rsi'] = 85  # Very oversold - high potential
-        elif rsi < 40:
-            scores['rsi'] = 95  # Oversold - optimal entry
-        elif rsi < 50:
-            scores['rsi'] = 75  # Slightly oversold - good
-        elif rsi < 60:
-            scores['rsi'] = 60  # Neutral to slightly bullish
-        elif rsi < 70:
-            scores['rsi'] = 40  # Getting overbought
-        else:
-            scores['rsi'] = 20  # Overbought - risky
-        
-        # MACD Score (positive histogram and rising = bullish)
-        if macd_hist > 0 and macd > macd_signal:
-            scores['macd'] = 80 + min(20, abs(macd_hist) * 10)  # 80-100
-        elif macd_hist > 0:
-            scores['macd'] = 60
-        elif macd > macd_signal:
-            scores['macd'] = 55
-        else:
-            scores['macd'] = 30
-        
-        # Moving Average Score (price above MAs = bullish)
-        ma_score = 0
-        ma_count = 0
-        for ma_name, ma_value in mas.items():
-            if current_price > ma_value:
-                ma_score += 100
-            ma_count += 1
-        scores['moving_avg'] = ma_score / ma_count if ma_count > 0 else 50
-        
-        # Volume Score (higher than average = bullish)
-        if volume_ratio > 1.5:
-            scores['volume'] = 90
-        elif volume_ratio > 1.2:
-            scores['volume'] = 75
-        elif volume_ratio > 1.0:
-            scores['volume'] = 60
-        elif volume_ratio > 0.8:
-            scores['volume'] = 45
-        else:
-            scores['volume'] = 30
-        
-        # Momentum Score (positive momentum = bullish, penalize negative)
-        # For flat ranges, we're more lenient on negative momentum since
-        # consolidating stocks may have slight negative momentum before breakout
-        if momentum > 5:
-            scores['momentum'] = 100
-        elif momentum > 2:
-            scores['momentum'] = 80
-        elif momentum > 0:
-            scores['momentum'] = 60
-        elif momentum > -2:
-            # Flat to slightly negative - not as bad for consolidating stocks
-            scores['momentum'] = 40
-        else:
-            # Highly negative momentum - reduced penalty (was 0, now 10)
-            # to avoid completely excluding stocks in tight consolidation patterns
-            scores['momentum'] = 10
-        
-        # Calculate composite score (weighted average)
-        weights = {
-            'rsi': 0.25,
-            'macd': 0.25,
-            'moving_avg': 0.20,
-            'volume': 0.15,
-            'momentum': 0.15
-        }
-        
-        composite_score = sum(scores[k] * weights[k] for k in scores.keys())
-        
-        # Flat Range Bonus: Identify stocks with low volatility and tight ranges
-        # that are oversold (RSI < 50) - these are ideal consolidation patterns
-        # like NEE and PFE that could break out
-        # Thresholds: volatility < 30% (annualized), price_range < 15% of price
-        is_flat_range = (volatility < 30 and price_range < 15)  # Low volatility and tight range
-        is_oversold = rsi < 50
-        
-        if is_flat_range and is_oversold:
-            # Apply bonus for flat consolidating stocks that are oversold
-            # Tighter the range, higher the bonus (max 10 points)
-            range_tightness = max(0, 15 - price_range)  # 0-15 scale
-            flat_range_bonus = min(10, range_tightness * 0.67)  # Up to 10 points
-            composite_score = min(100, composite_score + flat_range_bonus)
-        
-        # Calculate probability of upward trend (sigmoid-like function)
-        # Score ranges: 0-100, probability ranges: 0-100%
-        probability = min(100, max(0, composite_score))
-        
-        # Prepare indicator breakdown
+
+        # Indicator breakdown
         indicators = {
             'RSI': round(rsi, 2),
             'MACD': round(macd, 4),
@@ -466,19 +693,30 @@ class StockScorer:
             'Relative_Position': round(relative_position, 3),
             **{k: round(v, 2) for k, v in mas.items()}
         }
-        
-        # Add score contributions
+
+        # Score contributions include both legacy and new scores
         score_contributions = {
-            f'{k}_score': round(v, 1) for k, v in scores.items()
+            'trend_score': round(trend_score, 1),
+            'entry_score': round(entry_score, 1),
         }
-        
+
         return {
             'symbol': symbol,
             'score': round(composite_score, 2),
             'probability': round(probability, 1),
+            'trend_score': round(trend_score, 1),
+            'entry_score': round(entry_score, 1),
+            'regime': regime,
+            'strategy_type': strategy_type,
+            'confidence': confidence,
+            'rr_ratio': round(rr_ratio, 2),
+            'expected_return_pct': round(expected_return_pct, 2),
             'indicators': indicators,
             'score_contributions': score_contributions,
-            'raw_scores': scores,
+            'raw_scores': {
+                'trend': round(trend_score, 1),
+                'entry': round(entry_score, 1),
+            },
             'breakout_filters': breakout_filters,
             'support_resistance': {
                 'support': round(support, 2),
@@ -487,6 +725,7 @@ class StockScorer:
                 'data_quality_days': data_quality_days
             }
         }
+
     
     def rank_stocks(self, stocks_df: pd.DataFrame, top_n: int = 5) -> pd.DataFrame:
         """

@@ -200,7 +200,7 @@ def clear_debug_log():
         }
         st.session_state['debug_log']['api_calls'] = {
             'yahoo': 0,
-            'tradingview': 0,
+            'financialdata': 0,
             'alpaca': 0
         }
         st.session_state['debug_log']['timings'] = {}

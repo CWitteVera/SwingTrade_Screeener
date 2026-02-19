@@ -186,28 +186,31 @@ def suggest_entry_exit(
     # Check for pullback setup
     if not pd.isna(sma20) and not pd.isna(rsi_value):
         if current_price > sma20 and 35 <= rsi_value <= 60:
-            # Pullback entry setup
-            result['strategy'] = 'Pullback Entry'
-            result['entry'] = sma20 * (1 + pullback_pct)
-            
-            # Stop loss: below pivot low or ATR-based
-            if pivots['pivot_low'] is not None and not pd.isna(atr):
-                result['stop'] = min(pivots['pivot_low'], current_price - atr * atr_mult_stop)
-            elif not pd.isna(atr):
-                result['stop'] = current_price - atr * atr_mult_stop
-            else:
-                result['stop'] = current_price * 0.95  # 5% stop as fallback
-            
-            # Targets based on ATR
-            if not pd.isna(atr):
-                result['target1'] = result['entry'] + atr * atr_mult_targets[0]
-                result['target2'] = result['entry'] + atr * atr_mult_targets[1]
-            else:
-                result['target1'] = result['entry'] * 1.05
-                result['target2'] = result['entry'] * 1.10
-            
-            result['confidence'] = 'Medium'
-            result['notes'].append(f"Price above SMA20 (${sma20:.2f}), RSI in optimal range ({rsi_value:.1f})")
+            # Pullback entry setup: only valid if price has not already exceeded entry level
+            candidate_entry = sma20 * (1 + pullback_pct)
+            if current_price <= candidate_entry:
+                # Price is still in the pullback zone - valid pullback entry
+                result['strategy'] = 'Pullback Entry'
+                result['entry'] = candidate_entry
+                
+                # Stop loss: below pivot low or ATR-based
+                if pivots['pivot_low'] is not None and not pd.isna(atr):
+                    result['stop'] = min(pivots['pivot_low'], current_price - atr * atr_mult_stop)
+                elif not pd.isna(atr):
+                    result['stop'] = current_price - atr * atr_mult_stop
+                else:
+                    result['stop'] = current_price * 0.95  # 5% stop as fallback
+                
+                # Targets based on ATR
+                if not pd.isna(atr):
+                    result['target1'] = result['entry'] + atr * atr_mult_targets[0]
+                    result['target2'] = result['entry'] + atr * atr_mult_targets[1]
+                else:
+                    result['target1'] = result['entry'] * 1.05
+                    result['target2'] = result['entry'] * 1.10
+                
+                result['confidence'] = 'Medium'
+                result['notes'].append(f"Price above SMA20 (${sma20:.2f}), RSI in optimal range ({rsi_value:.1f})")
     
     # Check for breakout setup
     if pivots['pivot_high'] is not None and volume_ratio > 1.2:
@@ -234,11 +237,38 @@ def suggest_entry_exit(
             
             result['confidence'] = 'High' if volume_ratio > 1.5 else 'Medium'
             result['notes'].append(f"Breakout above pivot high (${pivots['pivot_high']:.2f}), Volume ratio: {volume_ratio:.2f}")
-    
+
+    # Check for range reversal setup (price near pivot low in a ranging market)
+    if result['strategy'] is None and pivots['pivot_low'] is not None and not pd.isna(sma20):
+        # RSI in neutral zone is one prerequisite for a range reversal entry
+        rsi_neutral_zone = not pd.isna(rsi_value) and 35 <= rsi_value <= 55
+        near_support = (
+            pivots['pivot_low'] is not None
+            and current_price <= pivots['pivot_low'] * 1.03  # Within 3% above pivot low
+        )
+        if rsi_neutral_zone and near_support:
+            result['strategy'] = 'Range Reversal'
+            result['entry'] = current_price
+
+            if not pd.isna(atr):
+                result['stop'] = pivots['pivot_low'] - atr * 0.5
+                result['target1'] = current_price + atr * atr_mult_targets[0]
+                result['target2'] = current_price + atr * atr_mult_targets[1]
+            else:
+                result['stop'] = pivots['pivot_low'] * 0.97
+                result['target1'] = current_price * 1.05
+                result['target2'] = current_price * 1.10
+
+            result['confidence'] = 'Medium' if volume_ratio > 1.0 else 'Low'
+            result['notes'].append(
+                f"Price near support (${pivots['pivot_low']:.2f}), RSI: {rsi_value:.1f}, "
+                f"range reversal opportunity"
+            )
+
     # If no setup detected
     if result['strategy'] is None:
         result['strategy'] = 'No Clear Setup'
-        result['notes'].append('No pullback or breakout pattern detected')
+        result['notes'].append('No pullback, breakout, or range reversal pattern detected')
         result['confidence'] = 'Low'
     
     return result
