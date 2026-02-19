@@ -8,19 +8,21 @@ from typing import List
 VALID_SYMBOL_PATTERN = re.compile(r'^[A-Z0-9.\-]+$')
 
 
-def clean_symbols(symbols: List[str]) -> List[str]:
+def clean_symbols(symbols) -> List[str]:
     """
     Clean and sanitize a list of stock symbols.
     
     This function:
+    - Accepts a list of symbols or a comma-separated string of symbols
     - Strips whitespace from each symbol
     - Converts to uppercase
     - Removes empty entries
     - Allows only A-Z, 0-9, dot (.), and dash (-) characters
     - Removes duplicates while preserving order
+    - Rejects single-character entries that look like string-iteration artifacts
     
     Args:
-        symbols: List of raw stock symbols
+        symbols: List of raw stock symbols, or a comma-separated string of symbols
         
     Returns:
         List of cleaned, valid stock symbols
@@ -31,9 +33,16 @@ def clean_symbols(symbols: List[str]) -> List[str]:
         
         >>> clean_symbols(['TSLA', 'INVALID@SYMBOL', 'BRK.B', 'BRK-A'])
         ['TSLA', 'BRK.B', 'BRK-A']
+        
+        >>> clean_symbols('AAPL,MSFT,GOOG')
+        ['AAPL', 'MSFT', 'GOOG']
     """
     if not symbols:
         return []
+    
+    # Handle string input: split on commas to avoid character-level iteration
+    if isinstance(symbols, str):
+        symbols = [s.strip() for s in symbols.split(',')]
     
     cleaned = []
     seen = set()
