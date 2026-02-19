@@ -835,6 +835,43 @@ def render_top5_summary_tab():
                     else:
                         st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
                     
+                    # Technical Analysis Chart with RSI, MACD, Volume
+                    st.markdown("#### 📊 Technical Analysis")
+                    
+                    # Prepare score_data for the technical chart
+                    score_data_for_chart = {
+                        'support_resistance': {
+                            'support': indicators.get('Support_90d', 0),
+                            'resistance': indicators.get('Resistance_90d', 0),
+                            'relative_position': indicators.get('Relative_Position', 0)
+                        },
+                        'indicators': indicators
+                    }
+                    
+                    tech_chart_img = visualizer.create_technical_analysis_chart(
+                        symbol,
+                        score_data_for_chart,
+                        hist_data
+                    )
+                    
+                    if tech_chart_img:
+                        st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                        
+                        # Display breakout filters if available
+                        breakout_filters = row.get('breakout_filters', {})
+                        if breakout_filters:
+                            st.markdown("##### 🚀 Breakout Signals")
+                            filter_cols = st.columns(5)
+                            
+                            filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                            filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                            
+                            for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                                with filter_cols[i]:
+                                    value = breakout_filters.get(key, False)
+                                    emoji = "✅" if value else "❌"
+                                    st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
+                    
                     # Entry/Exit Strategy
                     suggestion = suggest_entry_exit(hist_data)
                     
@@ -1047,6 +1084,43 @@ def render_all_scenarios_tab():
                                     st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
                                 else:
                                     st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                                
+                                # Technical Analysis Chart with RSI, MACD, Volume
+                                st.markdown("##### 📊 Technical Analysis")
+                                
+                                # Prepare score_data for the technical chart
+                                score_data_for_chart = {
+                                    'support_resistance': {
+                                        'support': indicators.get('Support_90d', 0),
+                                        'resistance': indicators.get('Resistance_90d', 0),
+                                        'relative_position': indicators.get('Relative_Position', 0)
+                                    },
+                                    'indicators': indicators
+                                }
+                                
+                                tech_chart_img = visualizer.create_technical_analysis_chart(
+                                    symbol,
+                                    score_data_for_chart,
+                                    hist_data
+                                )
+                                
+                                if tech_chart_img:
+                                    st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                    
+                                    # Display breakout filters if available
+                                    breakout_filters = row.get('breakout_filters', {})
+                                    if breakout_filters:
+                                        st.markdown("###### 🚀 Breakout Signals")
+                                        filter_cols = st.columns(5)
+                                        
+                                        filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                                        filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                                        
+                                        for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                                            with filter_cols[i]:
+                                                value = breakout_filters.get(key, False)
+                                                emoji = "✅" if value else "❌"
+                                                st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
                             
                             # Indicator breakdown
                             st.markdown("##### 🔍 Contributing Indicators")
@@ -1904,6 +1978,43 @@ def main():
                                             st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
                                         else:
                                             st.info("Chart generation requires matplotlib. Install with: pip install matplotlib")
+                                        
+                                        # Technical Analysis Chart with RSI, MACD, Volume
+                                        st.markdown("#### 📊 Technical Analysis")
+                                        
+                                        # Prepare score_data for the technical chart
+                                        score_data_for_chart = {
+                                            'support_resistance': {
+                                                'support': indicators.get('Support_90d', 0),
+                                                'resistance': indicators.get('Resistance_90d', 0),
+                                                'relative_position': indicators.get('Relative_Position', 0)
+                                            },
+                                            'indicators': indicators
+                                        }
+                                        
+                                        tech_chart_img = visualizer.create_technical_analysis_chart(
+                                            symbol,
+                                            score_data_for_chart,
+                                            hist_data
+                                        )
+                                        
+                                        if tech_chart_img:
+                                            st.markdown(f'<img src="{tech_chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                                            
+                                            # Display breakout filters if available
+                                            breakout_filters = row.get('breakout_filters', {})
+                                            if breakout_filters:
+                                                st.markdown("##### 🚀 Breakout Signals")
+                                                filter_cols = st.columns(5)
+                                                
+                                                filter_names = ['Volume Spike', 'RSI Momentum', 'MACD Momentum', 'Position', 'Breakout']
+                                                filter_keys = ['volume_spike', 'rsi_momentum', 'macd_momentum', 'position_favorable', 'breakout_signal']
+                                                
+                                                for i, (name, key) in enumerate(zip(filter_names, filter_keys)):
+                                                    with filter_cols[i]:
+                                                        value = breakout_filters.get(key, False)
+                                                        emoji = "✅" if value else "❌"
+                                                        st.markdown(f"**{name}**<br>{emoji}", unsafe_allow_html=True)
                                     
                                     # Indicator breakdown
                                     st.markdown("#### 🔍 Contributing Indicators")
