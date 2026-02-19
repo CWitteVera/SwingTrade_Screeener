@@ -194,15 +194,17 @@ class StockScorer:
         Returns:
             Tuple of (support_level, resistance_level)
         """
-        if hist_data.empty or len(hist_data) < period:
-            # Not enough data, return current price as both levels
-            if not hist_data.empty and 'Close' in hist_data.columns:
-                current = hist_data['Close'].iloc[-1]
-                return current, current
+        # Minimum 30 days required for meaningful support/resistance calculation
+        MIN_DAYS = 30
+        
+        if hist_data.empty or len(hist_data) < MIN_DAYS:
+            # Insufficient data - cannot calculate meaningful levels
             return 0.0, 0.0
         
-        # Use last 'period' days
-        recent_data = hist_data.tail(period)
+        # Use available data up to 'period' days
+        # If less than requested period, use what's available (min 30 days)
+        actual_period = min(period, len(hist_data))
+        recent_data = hist_data.tail(actual_period)
         
         # Support: minimum of low prices in period
         support = recent_data['Low'].min() if 'Low' in recent_data.columns else recent_data['Close'].min()
@@ -262,9 +264,10 @@ class StockScorer:
         # MACD momentum (histogram positive OR MACD crossing above signal)
         filters['macd_momentum'] = macd_hist > 0 or macd > macd_signal
         
-        # Relative position (40%-70% of support-resistance range)
+        # Relative position (40%-75% of support-resistance range)
+        # This ensures at least 25% distance from resistance
         relative_pos = self.calculate_relative_position(current_price, support, resistance)
-        filters['position_favorable'] = 0.4 <= relative_pos <= 0.7
+        filters['position_favorable'] = 0.4 <= relative_pos <= 0.75
         
         # Overall breakout signal (all filters must pass)
         # Rationale: A true breakout requires confluence of multiple factors:

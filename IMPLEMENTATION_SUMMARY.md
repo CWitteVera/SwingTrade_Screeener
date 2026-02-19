@@ -35,10 +35,10 @@ All requirements from the problem statement have been successfully implemented a
 
 #### Position Filter
 - **Implementation**: Part of `check_breakout_filters()` method
-- **Range**: 40%-70% of support-resistance range
+- **Range**: 40%-75% of support-resistance range
 - **Purpose**: Ensures stock has:
   - Moved above 40% (not near support/oversold)
-  - Room below 70% (space to run before resistance)
+  - Room below 75% (at least 25% space to run before resistance)
 
 #### Comprehensive Breakout Signal
 - **Implementation**: `check_breakout_filters()` method
@@ -154,7 +154,7 @@ All sections now include:
 | RSI momentum (50-70) | ✅ Complete |
 | MACD momentum | ✅ Complete |
 | Support/resistance levels | ✅ Complete |
-| Relative position (40-70%) | ✅ Complete |
+| Relative position (40-75%) | ✅ Complete |
 | Support/resistance chart lines | ✅ Complete |
 | RSI subplot with zones | ✅ Complete |
 | MACD subplot with histogram | ✅ Complete |

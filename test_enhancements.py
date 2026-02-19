@@ -37,11 +37,11 @@ def test_support_resistance():
                 print(f"  Resistance (90d): ${resistance:.2f}")
                 print(f"  Relative Position: {relative_pos:.1%}")
                 
-                # Check if in favorable range (40%-70%)
-                if 0.4 <= relative_pos <= 0.7:
+                # Check if in favorable range (40%-75%)
+                if 0.4 <= relative_pos <= 0.75:
                     print(f"  ✓ In favorable position range!")
                 else:
-                    print(f"  ✗ Outside favorable range (40%-70%)")
+                    print(f"  ✗ Outside favorable range (40%-75%)")
             else:
                 print(f"  ✗ No data available")
         except Exception as e:
@@ -83,7 +83,7 @@ def test_breakout_filters():
                 print(f"  Volume Spike (≥1.5x): {filters['volume_spike']} (ratio: {volume_ratio:.2f})")
                 print(f"  RSI Momentum (50-70): {filters['rsi_momentum']} (RSI: {rsi:.1f})")
                 print(f"  MACD Momentum: {filters['macd_momentum']} (hist: {macd_hist:.4f})")
-                print(f"  Position Favorable (40-70%): {filters['position_favorable']}")
+                print(f"  Position Favorable (40-75%): {filters['position_favorable']}")
                 print(f"  Overall Breakout Signal: {filters['breakout_signal']}")
                 
                 if filters['breakout_signal']:
