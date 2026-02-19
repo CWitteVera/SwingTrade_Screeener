@@ -183,7 +183,7 @@ class StockScorer:
             return ((high - low) / low) * 100
         return 0.0
     
-    def calculate_support_resistance(self, hist_data: pd.DataFrame, period: int = 90) -> Tuple[float, float]:
+    def calculate_support_resistance(self, hist_data: pd.DataFrame, period: int = 90) -> Tuple[float, float, int]:
         """
         Calculate support and resistance levels based on historical price data
         
@@ -192,17 +192,20 @@ class StockScorer:
             period: Lookback period for calculating levels (default 90 days)
             
         Returns:
-            Tuple of (support_level, resistance_level)
+            Tuple of (support_level, resistance_level, days_used)
+            days_used indicates actual number of days used for calculation
         """
-        if hist_data.empty or len(hist_data) < period:
-            # Not enough data, return current price as both levels
-            if not hist_data.empty and 'Close' in hist_data.columns:
-                current = hist_data['Close'].iloc[-1]
-                return current, current
-            return 0.0, 0.0
+        # Minimum 30 days required for meaningful support/resistance calculation
+        MIN_DAYS = 30
         
-        # Use last 'period' days
-        recent_data = hist_data.tail(period)
+        if hist_data.empty or len(hist_data) < MIN_DAYS:
+            # Insufficient data - cannot calculate meaningful levels
+            return 0.0, 0.0, 0
+        
+        # Use available data up to 'period' days
+        # If less than requested period, use what's available (min 30 days)
+        actual_period = min(period, len(hist_data))
+        recent_data = hist_data.tail(actual_period)
         
         # Support: minimum of low prices in period
         support = recent_data['Low'].min() if 'Low' in recent_data.columns else recent_data['Close'].min()
@@ -210,7 +213,7 @@ class StockScorer:
         # Resistance: maximum of high prices in period
         resistance = recent_data['High'].max() if 'High' in recent_data.columns else recent_data['Close'].max()
         
-        return support, resistance
+        return support, resistance, actual_period
     
     def calculate_relative_position(self, current_price: float, support: float, resistance: float) -> float:
         """
@@ -262,9 +265,10 @@ class StockScorer:
         # MACD momentum (histogram positive OR MACD crossing above signal)
         filters['macd_momentum'] = macd_hist > 0 or macd > macd_signal
         
-        # Relative position (40%-70% of support-resistance range)
+        # Relative position (40%-75% of support-resistance range)
+        # This ensures at least 25% distance from resistance
         relative_pos = self.calculate_relative_position(current_price, support, resistance)
-        filters['position_favorable'] = 0.4 <= relative_pos <= 0.7
+        filters['position_favorable'] = 0.4 <= relative_pos <= 0.75
         
         # Overall breakout signal (all filters must pass)
         # Rationale: A true breakout requires confluence of multiple factors:
@@ -343,7 +347,7 @@ class StockScorer:
         price_range = self.calculate_price_range(prices)
         
         # Calculate support and resistance levels
-        support, resistance = self.calculate_support_resistance(hist)
+        support, resistance, data_quality_days = self.calculate_support_resistance(hist)
         relative_position = self.calculate_relative_position(current_price, support, resistance)
         
         # Check breakout filters
@@ -479,7 +483,8 @@ class StockScorer:
             'support_resistance': {
                 'support': round(support, 2),
                 'resistance': round(resistance, 2),
-                'relative_position': round(relative_position, 3)
+                'relative_position': round(relative_position, 3),
+                'data_quality_days': data_quality_days
             }
         }
     

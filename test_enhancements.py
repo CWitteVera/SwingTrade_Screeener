@@ -28,7 +28,7 @@ def test_support_resistance():
         try:
             hist = scorer.fetch_historical_data(symbol)
             if not hist.empty:
-                support, resistance = scorer.calculate_support_resistance(hist, period=90)
+                support, resistance, days_used = scorer.calculate_support_resistance(hist, period=90)
                 current_price = hist['Close'].iloc[-1]
                 relative_pos = scorer.calculate_relative_position(current_price, support, resistance)
                 
@@ -37,11 +37,11 @@ def test_support_resistance():
                 print(f"  Resistance (90d): ${resistance:.2f}")
                 print(f"  Relative Position: {relative_pos:.1%}")
                 
-                # Check if in favorable range (40%-70%)
-                if 0.4 <= relative_pos <= 0.7:
+                # Check if in favorable range (40%-75%)
+                if 0.4 <= relative_pos <= 0.75:
                     print(f"  ✓ In favorable position range!")
                 else:
-                    print(f"  ✗ Outside favorable range (40%-70%)")
+                    print(f"  ✗ Outside favorable range (40%-75%)")
             else:
                 print(f"  ✗ No data available")
         except Exception as e:
@@ -72,7 +72,7 @@ def test_breakout_filters():
                 rsi = scorer.calculate_rsi(hist['Close'])
                 macd, macd_signal, macd_hist = scorer.calculate_macd(hist['Close'])
                 volume_ratio = scorer.calculate_volume_trend(hist['Volume'])
-                support, resistance = scorer.calculate_support_resistance(hist)
+                support, resistance, _ = scorer.calculate_support_resistance(hist)
                 
                 # Check filters
                 filters = scorer.check_breakout_filters(
@@ -83,7 +83,7 @@ def test_breakout_filters():
                 print(f"  Volume Spike (≥1.5x): {filters['volume_spike']} (ratio: {volume_ratio:.2f})")
                 print(f"  RSI Momentum (50-70): {filters['rsi_momentum']} (RSI: {rsi:.1f})")
                 print(f"  MACD Momentum: {filters['macd_momentum']} (hist: {macd_hist:.4f})")
-                print(f"  Position Favorable (40-70%): {filters['position_favorable']}")
+                print(f"  Position Favorable (40-75%): {filters['position_favorable']}")
                 print(f"  Overall Breakout Signal: {filters['breakout_signal']}")
                 
                 if filters['breakout_signal']:

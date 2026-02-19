@@ -51,7 +51,7 @@ def test_support_resistance_with_mock_data():
     print(f"  Price range: ${hist['Close'].min():.2f} - ${hist['Close'].max():.2f}")
     
     # Calculate support and resistance
-    support, resistance = scorer.calculate_support_resistance(hist, period=90)
+    support, resistance, days_used = scorer.calculate_support_resistance(hist, period=90)
     current_price = hist['Close'].iloc[-1]
     relative_pos = scorer.calculate_relative_position(current_price, support, resistance)
     
@@ -66,10 +66,10 @@ def test_support_resistance_with_mock_data():
     assert resistance > support, "Resistance should be greater than support"
     assert 0 <= relative_pos <= 1, "Relative position should be between 0 and 1"
     
-    if 0.4 <= relative_pos <= 0.7:
+    if 0.4 <= relative_pos <= 0.75:
         print(f"  ✓ In favorable position range!")
     else:
-        print(f"  ✗ Outside favorable range (40%-70%)")
+        print(f"  ✗ Outside favorable range (40%-75%)")
     
     print("\n✓ Support/Resistance test PASSED")
     return True
@@ -97,7 +97,7 @@ def test_breakout_filters_with_mock_data():
     rsi = scorer.calculate_rsi(hist['Close'])
     macd, macd_signal, macd_hist = scorer.calculate_macd(hist['Close'])
     volume_ratio = scorer.calculate_volume_trend(hist['Volume'])
-    support, resistance = scorer.calculate_support_resistance(hist)
+    support, resistance, _ = scorer.calculate_support_resistance(hist)
     
     print(f"\nIndicator values:")
     print(f"  RSI: {rsi:.1f}")
@@ -115,7 +115,7 @@ def test_breakout_filters_with_mock_data():
     print(f"  Volume Spike (≥1.5x): {filters['volume_spike']}")
     print(f"  RSI Momentum (50-70): {filters['rsi_momentum']}")
     print(f"  MACD Momentum: {filters['macd_momentum']}")
-    print(f"  Position Favorable (40-70%): {filters['position_favorable']}")
+    print(f"  Position Favorable (40-75%): {filters['position_favorable']}")
     print(f"  Overall Breakout Signal: {filters['breakout_signal']}")
     
     # Verify the filters are working

@@ -38,11 +38,11 @@ The screener includes comprehensive breakout filters to identify stocks with pot
   - MACD > Signal = bullish crossover
 
 #### Position Filter
-- **Filter**: Relative position between 40% and 70% of support-resistance range
+- **Filter**: Relative position between 40% and 75% of support-resistance range
 - **Purpose**: Identifies stocks positioned favorably for breakouts
 - **Logic**: 
   - Above 40% (not near support/oversold)
-  - Below 70% (room to run before resistance)
+  - Below 75% (at least 25% room to run before resistance)
 
 #### Overall Breakout Signal
 - **Condition**: ALL filters must pass (volume spike + RSI momentum + MACD momentum + favorable position)
@@ -227,7 +227,7 @@ print(breakout_df.sort_values('score', ascending=False))
 
 #### Position Calculation
 - Formula: `(current_price - support) / (resistance - support)`
-- Favorable range: 0.4 to 0.7 (40% to 70%)
+- Favorable range: 0.4 to 0.75 (40% to 75%)
 - Clamped to 0.0-1.0 range
 
 ## Integration in Streamlit App

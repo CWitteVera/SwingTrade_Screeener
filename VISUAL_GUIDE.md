@@ -39,7 +39,7 @@ Below each chart, a 5-column indicator dashboard shows:
 | Volume Spike | RSI Momentum | MACD Momentum | Position | Breakout |
 |:------------:|:------------:|:-------------:|:--------:|:--------:|
 | ✅/❌ | ✅/❌ | ✅/❌ | ✅/❌ | ✅/❌ |
-| (≥1.5x) | (50-70) | (positive) | (40-70%) | (ALL) |
+| (≥1.5x) | (50-70) | (positive) | (40-75%) | (ALL) |
 
 ## Example Interpretation
 
@@ -48,7 +48,7 @@ Below each chart, a 5-column indicator dashboard shows:
 ✅ Volume Spike    → Trading interest confirmed
 ✅ RSI Momentum    → Healthy upward trend (50-70)
 ✅ MACD Momentum   → Positive momentum confirmed
-✅ Position        → Good position (40-70% range)
+✅ Position        → Good position (40-75% range)
 ✅ Breakout        → STRONG BREAKOUT SIGNAL!
 ```
 
