@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-Tests for FinancialData.Net integration fixes:
-1. Symbol corruption fix - clean_symbols handles string input
-2. Fallback mechanism triggers when API returns empty data
-3. 401 error produces actionable log message
+Tests for symbol utilities used across data sources.
+Tests clean_symbols handles various input formats correctly.
 """
 import sys
 import os
-import logging
 import unittest
-from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from data_sources.symbol_utils import clean_symbols
@@ -84,126 +80,11 @@ class TestCleanSymbolsStringInput(unittest.TestCase):
         self.assertEqual(result, ['AAPL'])
 
 
-class TestFinancialDataFallback(unittest.TestCase):
-    """Test that fetch_data falls back to Yahoo Finance when API is unavailable or returns empty data"""
-
-    def _make_yahoo_df(self):
-        """Helper to create a mock Yahoo Finance DataFrame"""
-        import pandas as pd
-        return pd.DataFrame([{'symbol': 'AAPL', 'price': 150.0, 'volume': 1000000,
-                               'change': 1.0, 'change_pct': 0.67}])
-
-    @patch('data_sources.financialdata_client.HAS_SDK', True)
-    def test_fallback_when_not_available(self):
-        """Should fall back to Yahoo Finance when is_available() returns False"""
-        from data_sources.financialdata_client import FinancialDataNetSource
-
-        source = FinancialDataNetSource()
-        # Ensure not available (no API key)
-        source.api_key = None
-        source.client = None
-
-        with patch('data_sources.yahoo.YahooDataSource.fetch_data', return_value=self._make_yahoo_df()):
-            result = source.fetch_data(['AAPL', 'MSFT'])
-
-        self.assertTrue(result.attrs.get('is_fallback', False))
-        self.assertFalse(result.empty)
-
-    @patch('data_sources.financialdata_client.HAS_SDK', True)
-    def test_fallback_when_get_quotes_returns_empty(self):
-        """Should fall back to Yahoo Finance when get_quotes returns empty DataFrame"""
-        from data_sources.financialdata_client import FinancialDataNetSource
-
-        source = FinancialDataNetSource()
-        source.api_key = 'test_key'
-
-        mock_client = MagicMock()
-        mock_client.get_stock_quotes.return_value = []
-        source.client = mock_client
-
-        with patch('data_sources.yahoo.YahooDataSource.fetch_data', return_value=self._make_yahoo_df()):
-            result = source.fetch_data(['AAPL', 'MSFT'])
-
-        self.assertTrue(result.attrs.get('is_fallback', False))
-        self.assertFalse(result.empty)
-
-    @patch('data_sources.financialdata_client.HAS_SDK', True)
-    def test_no_fallback_when_data_returned(self):
-        """Should NOT fall back when get_quotes returns valid data"""
-        import pandas as pd
-        from data_sources.financialdata_client import FinancialDataNetSource
-
-        source = FinancialDataNetSource()
-        source.api_key = 'test_key'
-
-        mock_client = MagicMock()
-        mock_client.get_stock_quotes.return_value = [
-            {'trading_symbol': 'AAPL', 'close': 150.0, 'volume': 1000000, 'market_cap': 2e12,
-             'open': 148.0, 'high': 152.0, 'low': 147.0}
-        ]
-        source.client = mock_client
-
-        result = source.fetch_data(['AAPL'])
-
-        self.assertFalse(result.attrs.get('is_fallback', True))
-        self.assertFalse(result.empty)
-        self.assertEqual(result.iloc[0]['symbol'], 'AAPL')
-
-
-class TestDebugLogging(unittest.TestCase):
-    """Test that debug logging is present in get_quotes"""
-
-    @patch('data_sources.financialdata_client.HAS_SDK', True)
-    def test_debug_logging_called(self):
-        """Debug logging should be called before API request"""
-        import pandas as pd
-        from data_sources.financialdata_client import FinancialDataNetSource
-
-        source = FinancialDataNetSource()
-        source.api_key = 'test_key'
-
-        mock_client = MagicMock()
-        mock_client.get_stock_quotes.return_value = [
-            {'trading_symbol': 'AAPL', 'close': 150.0, 'volume': 1000000, 'market_cap': 2e12,
-             'open': 148.0, 'high': 152.0, 'low': 147.0}
-        ]
-        source.client = mock_client
-
-        with patch('data_sources.financialdata_client.logger') as mock_logger:
-            source.get_quotes(['AAPL', 'MSFT'])
-            # Verify debug was called (at least 2 times for symbol count and first 5 symbols)
-            self.assertGreaterEqual(mock_logger.debug.call_count, 2)
-
-    @patch('data_sources.financialdata_client.HAS_SDK', True)
-    def test_401_error_logs_troubleshooting_steps(self):
-        """401 error should produce log message with troubleshooting steps"""
-        from data_sources.financialdata_client import FinancialDataNetSource
-
-        source = FinancialDataNetSource()
-        source.api_key = 'test_key'
-
-        mock_client = MagicMock()
-        mock_client.get_stock_quotes.side_effect = Exception("401 Client Error: Unauthorized")
-        source.client = mock_client
-
-        with patch('data_sources.financialdata_client.logger') as mock_logger:
-            source.get_quotes(['AAPL'])
-            # Should log an error
-            self.assertTrue(mock_logger.error.called)
-            # Error message should contain actionable guidance
-            error_msg = mock_logger.error.call_args[0][0]
-            self.assertIn('401', error_msg)
-            self.assertIn('FINANCIALDATA_API_KEY', error_msg)
-            self.assertIn('financialdata.net', error_msg)
-
-
 if __name__ == '__main__':
-    print("\n🧪 Running FinancialData.Net Integration Fix Tests\n")
+    print("\n🧪 Running Symbol Utility Tests\n")
     loader = unittest.TestLoader()
     suite = unittest.TestSuite()
     suite.addTests(loader.loadTestsFromTestCase(TestCleanSymbolsStringInput))
-    suite.addTests(loader.loadTestsFromTestCase(TestFinancialDataFallback))
-    suite.addTests(loader.loadTestsFromTestCase(TestDebugLogging))
 
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)

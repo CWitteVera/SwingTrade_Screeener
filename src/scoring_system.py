@@ -558,9 +558,39 @@ class StockScorer:
             Dictionary with score, probability, indicators, trend/entry breakdown,
             regime, strategy_type, confidence, rr_ratio, and expected_return_pct
         """
-        # Fetch historical data
         hist = self.fetch_historical_data(symbol)
+        return self._score_from_hist(symbol, current_price, hist)
 
+    def score_stock_from_hist(self, symbol: str, current_price: float, hist: pd.DataFrame) -> Dict:
+        """
+        Calculate comprehensive score using pre-fetched historical data (for backtesting).
+
+        Accepts historical data directly instead of fetching internally, allowing
+        simulation of the screener as of any historical date.
+
+        Args:
+            symbol: Stock ticker symbol
+            current_price: Stock price at the signal date
+            hist: Historical OHLCV DataFrame up to the signal date
+
+        Returns:
+            Same dictionary as score_stock
+        """
+        return self._score_from_hist(symbol, current_price, hist)
+
+    def _score_from_hist(self, symbol: str, current_price: float, hist: pd.DataFrame) -> Dict:
+        """
+        Internal implementation of stock scoring using provided historical data.
+
+        Args:
+            symbol: Stock ticker symbol
+            current_price: Current stock price
+            hist: Historical OHLCV DataFrame
+
+        Returns:
+            Dictionary with score, probability, indicators, trend/entry breakdown,
+            regime, strategy_type, confidence, rr_ratio, and expected_return_pct
+        """
         if hist.empty or len(hist) < 20:
             return {
                 'symbol': symbol,
