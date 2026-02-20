@@ -257,6 +257,44 @@ def test_technical_chart_with_mock_data():
     return True
 
 
+def test_backtested_forecast_chart_with_mock_data():
+    """Test backtested forecast accuracy chart with mock data"""
+    print("\n" + "=" * 60)
+    print("TEST 5: Backtested Forecast Accuracy Chart (Mock Data)")
+    print("=" * 60)
+
+    visualizer = StockVisualizer()
+    hist = create_mock_stock_data(days=200, base_price=100)
+
+    print(f"\n  Mock data points: {len(hist)}")
+    print(f"  Current price: ${hist['Close'].iloc[-1]:.2f}")
+
+    chart_data = visualizer.create_backtested_forecast_chart(
+        'MOCK', hist, forecast_days=14, num_past_forecasts=5
+    )
+
+    if chart_data:
+        print("\n✓ Backtested forecast chart generated successfully!")
+        print(f"  Chart data length: {len(chart_data)} characters")
+        print(f"  Contains base64 image: {'data:image/png;base64' in chart_data}")
+        assert chart_data.startswith('data:image/png;base64,'), "Should be base64 PNG"
+        assert len(chart_data) > 1000, "Chart data should be substantial"
+    else:
+        print("  ✗ Chart generation failed")
+        return False
+
+    # Also verify it returns None gracefully with insufficient data
+    tiny_hist = create_mock_stock_data(days=5, base_price=100)
+    result_none = visualizer.create_backtested_forecast_chart(
+        'MOCK', tiny_hist, forecast_days=14, num_past_forecasts=5
+    )
+    assert result_none is None, "Should return None with insufficient data"
+    print("  ✓ Returns None gracefully with insufficient data")
+
+    print("\n✓ Backtested forecast chart test PASSED")
+    return True
+
+
 def main():
     """Run all tests"""
     print("\n" + "=" * 60)
@@ -268,6 +306,7 @@ def main():
         test_breakout_filters_with_mock_data,
         test_comprehensive_scoring_with_mock_data,
         test_technical_chart_with_mock_data,
+        test_backtested_forecast_chart_with_mock_data,
     ]
     
     results = []

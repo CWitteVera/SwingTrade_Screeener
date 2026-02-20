@@ -24,6 +24,9 @@ except ImportError:
     _HAS_SCORER = False
     _StockScorer = None
 
+# Default fallback confidence band half-width (±3% around current price)
+_DEFAULT_CONF_BAND = 0.03
+
 
 class StockVisualizer:
     """Create visualizations for stock analysis"""
@@ -455,6 +458,171 @@ class StockVisualizer:
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         
+        return f"data:image/png;base64,{img_base64}"
+
+    def create_backtested_forecast_chart(self, symbol: str, hist_data: pd.DataFrame,
+                                         forecast_days: int = 14,
+                                         num_past_forecasts: int = 5) -> Optional[str]:
+        """
+        Create a chart showing past forecast cones overlaid on price history to demonstrate
+        prediction confidence. Each historical forecast is colored green if the actual price
+        ended inside the predicted 80% confidence band (prediction correct) or red if it fell
+        outside that range (prediction failed). The most-recent forward forecast is shown in
+        purple/grey.
+
+        This visual pattern mirrors the "walk-forward fan chart" used in quantitative finance
+        to audit model accuracy over time.
+
+        Args:
+            symbol: Stock ticker symbol
+            hist_data: Historical OHLCV data (needs at least 2×forecast_days + 20 rows)
+            forecast_days: Length of each forecast window in trading days
+            num_past_forecasts: How many historical forecast windows to overlay
+
+        Returns:
+            Base64-encoded PNG image or None if matplotlib / data not available
+        """
+        if not self.has_matplotlib or hist_data is None or hist_data.empty:
+            return None
+
+        min_rows = forecast_days * (num_past_forecasts + 1) + 20
+        if len(hist_data) < min_rows:
+            return None
+
+        from price_predictor import PricePredictor
+        predictor = PricePredictor(forecast_days=forecast_days)
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+
+        # Build a numeric day-index for the full history
+        full_data = hist_data.copy()
+        full_data['day'] = range(len(full_data))
+
+        # Plot the full price history as a thin line
+        ax.plot(full_data['day'], full_data['Close'],
+                color='#2E86AB', linewidth=1.5, label='Price History', zorder=2)
+
+        # ------------------------------------------------------------------ #
+        # Walk-forward loop: generate one forecast window per step
+        # ------------------------------------------------------------------ #
+        step = max(1, forecast_days)  # advance by one full forecast window at a time
+        # Signal indices: evenly spaced, ending before the last window
+        last_signal_idx = len(full_data) - forecast_days - 1
+        signal_indices = []
+        idx = last_signal_idx
+        while idx >= 20 and len(signal_indices) < num_past_forecasts:
+            signal_indices.append(idx)
+            idx -= step
+        signal_indices.reverse()  # chronological order
+
+        correct_patch = None
+        incorrect_patch = None
+
+        for sig_idx in signal_indices:
+            signal_day = int(full_data['day'].iloc[sig_idx])
+            signal_price = float(full_data['Close'].iloc[sig_idx])
+
+            # Predict using only data available up to the signal point
+            hist_slice = hist_data.iloc[:sig_idx + 1].copy()
+            pred = predictor.predict_price_range(symbol, signal_price, hist_slice)
+
+            conf_low = pred.get('confidence_80_low', signal_price * (1 - _DEFAULT_CONF_BAND))
+            conf_high = pred.get('confidence_80_high', signal_price * (1 + _DEFAULT_CONF_BAND))
+            predicted_price = pred.get('predicted_price', signal_price)
+
+            # Actual exit price (forecast_days bars after signal)
+            exit_idx = sig_idx + forecast_days
+            if exit_idx >= len(full_data):
+                continue
+            exit_price = float(full_data['Close'].iloc[exit_idx])
+            exit_day = int(full_data['day'].iloc[exit_idx])
+
+            # Colour logic: green = exit inside 80% confidence band, red = outside
+            hit = conf_low <= exit_price <= conf_high
+            cone_color = '#06A77D' if hit else '#D62839'  # green or red
+
+            forecast_x = [signal_day, exit_day]
+
+            # Draw the confidence cone
+            fill = ax.fill_between(
+                forecast_x,
+                [signal_price, conf_low],
+                [signal_price, conf_high],
+                alpha=0.25, color=cone_color, zorder=3
+            )
+            # Draw the centre prediction line
+            ax.plot(forecast_x, [signal_price, predicted_price],
+                    color=cone_color, linewidth=1.5, linestyle='--',
+                    alpha=0.8, zorder=4)
+            # Mark the exit point
+            ax.scatter([exit_day], [exit_price],
+                       color=cone_color, s=50, zorder=5)
+
+            if hit and correct_patch is None:
+                correct_patch = fill
+            if not hit and incorrect_patch is None:
+                incorrect_patch = fill
+
+        # ------------------------------------------------------------------ #
+        # Forward forecast (current / future) in purple
+        # ------------------------------------------------------------------ #
+        last_idx = len(full_data) - 1
+        last_day = int(full_data['day'].iloc[last_idx])
+        current_price = float(full_data['Close'].iloc[last_idx])
+        fwd_pred = predictor.predict_price_range(symbol, current_price, hist_data)
+        fwd_conf_low = fwd_pred.get('confidence_80_low', current_price * (1 - _DEFAULT_CONF_BAND))
+        fwd_conf_high = fwd_pred.get('confidence_80_high', current_price * (1 + _DEFAULT_CONF_BAND))
+        fwd_predicted = fwd_pred.get('predicted_price', current_price)
+
+        fwd_x = [last_day, last_day + forecast_days]
+        ax.fill_between(fwd_x,
+                        [current_price, fwd_conf_low],
+                        [current_price, fwd_conf_high],
+                        alpha=0.3, color='#A23B72', zorder=3)
+        ax.plot(fwd_x, [current_price, fwd_predicted],
+                color='#A23B72', linewidth=2, linestyle='--', zorder=4,
+                label=f'Current Forecast (${fwd_predicted:.2f})')
+        ax.scatter([last_day], [current_price],
+                   color='#A23B72', s=80, zorder=6,
+                   label=f'Today: ${current_price:.2f}')
+
+        # ------------------------------------------------------------------ #
+        # Legend and formatting
+        # ------------------------------------------------------------------ #
+        # Build proxy artists for the coloured cones
+        import matplotlib.patches as mpatches
+        legend_handles = [
+            ax.get_lines()[0],  # price history line
+        ]
+        if correct_patch is not None:
+            legend_handles.append(
+                mpatches.Patch(color='#06A77D', alpha=0.5, label='Forecast Hit (within 80% band)')
+            )
+        if incorrect_patch is not None:
+            legend_handles.append(
+                mpatches.Patch(color='#D62839', alpha=0.5, label='Forecast Miss (outside 80% band)')
+            )
+        legend_handles.append(
+            mpatches.Patch(color='#A23B72', alpha=0.4, label='Current Forecast (80% band)')
+        )
+
+        ax.set_xlabel('Trading Day Index', fontsize=9)
+        ax.set_ylabel('Price ($)', fontsize=9)
+        ax.set_title(
+            f'{symbol} — Backtested Forecast Accuracy ({num_past_forecasts} windows × {forecast_days} days)',
+            fontsize=10, fontweight='bold'
+        )
+        ax.legend(handles=legend_handles, loc='upper left', fontsize=7)
+        ax.grid(True, alpha=0.3, linestyle='--')
+        ax.tick_params(labelsize=8)
+
+        plt.tight_layout()
+
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode('utf-8')
         return f"data:image/png;base64,{img_base64}"
 
     def create_full_analysis_chart(self, symbol: str, score_data: Dict,
