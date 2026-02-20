@@ -1,0 +1,4 @@
+ticker,shares,avg_cost,purchase_date,notes
+AAPL,10,150.00,2023-06-15,Initial position
+MSFT,5,280.00,2022-12-01,Long-term hold
+NVDA,3,400.00,2024-03-10,Added after earnings dip

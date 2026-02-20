@@ -56,3 +56,6 @@ tmp/
 *.env
 secrets.*
 cookies.json
+
+# Personal holdings data (private — do not commit)
+my_holdings.csv

@@ -27,7 +27,7 @@ from scoring_system import StockScorer
 from price_predictor import PricePredictor
 from visualizations import StockVisualizer
 from combined_top5 import add_to_top5_aggregator, render_combined_top5_plot
-from trade_signals import suggest_entry_exit
+from trade_signals import suggest_entry_exit, calculate_rsi, sma
 
 
 # Page configuration
@@ -1168,6 +1168,445 @@ def render_all_scenarios_tab():
                 st.error(f"Error generating suggestion: {str(e)}")
 
 
+# ============================================================================
+# HOLDINGS FILE PATH
+# ============================================================================
+HOLDINGS_FILE = os.path.join(os.path.dirname(__file__), "my_holdings.csv")
+
+
+def load_holdings() -> pd.DataFrame:
+    """Load holdings from my_holdings.csv, returning empty DataFrame if not found."""
+    if os.path.exists(HOLDINGS_FILE):
+        try:
+            df = pd.read_csv(HOLDINGS_FILE)
+            required_cols = ['ticker', 'shares', 'avg_cost', 'purchase_date']
+            if all(col in df.columns for col in required_cols):
+                df['purchase_date'] = pd.to_datetime(df['purchase_date'], errors='coerce')
+                return df
+        except (OSError, pd.errors.ParserError, ValueError):
+            pass
+    return pd.DataFrame(columns=['ticker', 'shares', 'avg_cost', 'purchase_date', 'notes'])
+
+
+def save_holdings(df: pd.DataFrame):
+    """Save holdings DataFrame to my_holdings.csv."""
+    save_df = df.copy()
+    if 'purchase_date' in save_df.columns:
+        save_df['purchase_date'] = save_df['purchase_date'].apply(
+            lambda d: d.strftime('%Y-%m-%d') if pd.notna(d) else ''
+        )
+    save_df.to_csv(HOLDINGS_FILE, index=False)
+
+
+def render_watchlist_tab():
+    """
+    Render the Watchlist tab for managing current holdings and getting
+    buy/sell/average-down recommendations with tax awareness.
+    """
+    st.subheader("📋 My Watchlist & Holdings")
+    st.info(
+        f"Holdings are stored in `my_holdings.csv` (gitignored — your data stays private). "
+        "Add your current positions below to get personalized buy/sell recommendations."
+    )
+
+    holdings_df = load_holdings()
+
+    # -------------------------------------------------------------------------
+    # Add new holding form
+    # -------------------------------------------------------------------------
+    st.markdown("### ➕ Add a Holding")
+    with st.form("add_holding_form", clear_on_submit=True):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            new_ticker = st.text_input("Ticker Symbol", placeholder="AAPL")
+        with col2:
+            new_shares = st.number_input("Shares", min_value=0.001, value=1.0, step=0.001, format="%.3f")
+        with col3:
+            new_cost = st.number_input("Avg Cost/Share ($)", min_value=0.01, value=100.0, step=0.01, format="%.2f")
+        with col4:
+            new_date = st.date_input("Purchase Date", value=date.today())
+        new_notes = st.text_input("Notes (optional)", placeholder="e.g., Initial position")
+        submitted = st.form_submit_button("➕ Add Holding", type="primary")
+
+    if submitted:
+        ticker_clean = new_ticker.strip().upper()
+        if ticker_clean:
+            new_row = pd.DataFrame([{
+                'ticker': ticker_clean,
+                'shares': new_shares,
+                'avg_cost': new_cost,
+                'purchase_date': pd.Timestamp(new_date),
+                'notes': new_notes
+            }])
+            holdings_df = pd.concat([holdings_df, new_row], ignore_index=True)
+            save_holdings(holdings_df)
+            st.success(f"Added {new_shares:.3f} shares of {ticker_clean} at ${new_cost:.2f}")
+            st.rerun()
+
+    if holdings_df.empty:
+        st.warning("No holdings yet. Add your first position above or edit `my_holdings.csv` directly.")
+        return
+
+    st.markdown("---")
+
+    # -------------------------------------------------------------------------
+    # Summary table across all tickers
+    # -------------------------------------------------------------------------
+    st.markdown("### 📊 Portfolio Summary")
+
+    tickers = holdings_df['ticker'].unique().tolist()
+
+    # Fetch current prices (use fast_info to avoid heavy API calls)
+    current_prices: Dict[str, Optional[float]] = {}
+    for ticker in tickers:
+        try:
+            info = yf.Ticker(ticker).fast_info
+            price = getattr(info, 'last_price', None)
+            current_prices[ticker] = float(price) if price and not pd.isna(price) else None
+        except Exception:
+            current_prices[ticker] = None
+
+    summary_rows = []
+    for ticker in tickers:
+        lots = holdings_df[holdings_df['ticker'] == ticker]
+        total_shares = lots['shares'].sum()
+        weighted_cost = (lots['shares'] * lots['avg_cost']).sum() / total_shares
+        cp = current_prices.get(ticker)
+
+        today_ts = pd.Timestamp.now()
+        has_st = any(
+            (today_ts - lot['purchase_date']).days < 365
+            for _, lot in lots.iterrows()
+            if pd.notna(lot['purchase_date'])
+        )
+        has_lt = any(
+            (today_ts - lot['purchase_date']).days >= 365
+            for _, lot in lots.iterrows()
+            if pd.notna(lot['purchase_date'])
+        )
+        tax_label = '/'.join(filter(None, ['ST' if has_st else '', 'LT' if has_lt else '']))
+
+        if cp is not None:
+            total_cost = total_shares * weighted_cost
+            total_value = total_shares * cp
+            pnl = total_value - total_cost
+            pnl_pct = (pnl / total_cost * 100) if total_cost else 0
+            summary_rows.append({
+                'Ticker': ticker,
+                'Shares': f"{total_shares:.3f}",
+                'Avg Cost': f"${weighted_cost:.2f}",
+                'Current Price': f"${cp:.2f}",
+                'Total Value': f"${total_value:,.2f}",
+                'P&L $': f"${pnl:+,.2f}",
+                'P&L %': f"{pnl_pct:+.1f}%",
+                'Tax Status': tax_label or 'Unknown',
+            })
+        else:
+            summary_rows.append({
+                'Ticker': ticker,
+                'Shares': f"{total_shares:.3f}",
+                'Avg Cost': f"${weighted_cost:.2f}",
+                'Current Price': 'N/A',
+                'Total Value': 'N/A',
+                'P&L $': 'N/A',
+                'P&L %': 'N/A',
+                'Tax Status': tax_label or 'Unknown',
+            })
+
+    st.dataframe(pd.DataFrame(summary_rows), use_container_width=True, hide_index=True)
+    st.markdown("---")
+
+    # -------------------------------------------------------------------------
+    # Per-ticker detailed analysis
+    # -------------------------------------------------------------------------
+    st.markdown("### 🎯 Position Analysis & Recommendations")
+
+    for ticker in tickers:
+        lots = holdings_df[holdings_df['ticker'] == ticker]
+        total_shares = lots['shares'].sum()
+        weighted_cost = (lots['shares'] * lots['avg_cost']).sum() / total_shares
+        cp = current_prices.get(ticker)
+
+        # Quick headline for expander label
+        if cp is not None:
+            pnl_pct_val = (cp - weighted_cost) / weighted_cost * 100
+            if pnl_pct_val > 15:
+                headline = "🔴 Consider Selling"
+            elif pnl_pct_val < -10:
+                headline = "🟡 Review Position"
+            else:
+                headline = "🟢 Hold"
+            price_str = f"${cp:.2f} (now) / ${weighted_cost:.2f} (avg) | {pnl_pct_val:+.1f}%"
+        else:
+            headline = "⚪ Price Unavailable"
+            pnl_pct_val = None
+            price_str = f"${weighted_cost:.2f} avg cost"
+
+        with st.expander(
+            f"**{ticker}** — {total_shares:.3f} shares | {price_str} | {headline}",
+            expanded=True
+        ):
+            # --- Position metrics ---
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Avg Cost Basis", f"${weighted_cost:.2f}")
+            with col2:
+                if cp is not None:
+                    st.metric(
+                        "Current Price", f"${cp:.2f}",
+                        delta=f"{pnl_pct_val:+.1f}%"
+                    )
+                else:
+                    st.metric("Current Price", "N/A")
+            with col3:
+                if cp is not None:
+                    total_pnl = (cp - weighted_cost) * total_shares
+                    st.metric("Total P&L", f"${total_pnl:+,.2f}")
+                else:
+                    st.metric("Total P&L", "N/A")
+            with col4:
+                st.metric("Total Shares", f"{total_shares:.3f}")
+
+            # --- Tax analysis ---
+            st.markdown("#### 💰 Tax Lot Analysis")
+            today_ts = pd.Timestamp.now()
+            tax_rows = []
+            for _, lot in lots.iterrows():
+                if pd.notna(lot['purchase_date']):
+                    days_held = (today_ts - lot['purchase_date']).days
+                    is_lt = days_held >= 365
+                    treatment = "Long-Term (≥1yr) — 0–20%" if is_lt else "Short-Term (<1yr) — up to 37%"
+                    days_to_lt = max(0, 365 - days_held) if not is_lt else 0
+                    lot_gain = (cp - lot['avg_cost']) * lot['shares'] if cp is not None else None
+                    tax_rows.append({
+                        'Purchase Date': lot['purchase_date'].strftime('%Y-%m-%d'),
+                        'Shares': lot['shares'],
+                        'Cost/Share': f"${lot['avg_cost']:.2f}",
+                        'Days Held': days_held,
+                        'Tax Treatment': treatment,
+                        'Est. Gain/Loss': f"${lot_gain:+,.2f}" if lot_gain is not None else 'N/A',
+                        'Days → Long-Term': days_to_lt if not is_lt else 'Already LT',
+                        'Notes': lot.get('notes', ''),
+                    })
+            if tax_rows:
+                st.dataframe(pd.DataFrame(tax_rows), use_container_width=True, hide_index=True)
+                # Near-LT advisories
+                for row in tax_rows:
+                    dlt = row['Days → Long-Term']
+                    if isinstance(dlt, int) and 0 < dlt <= 90:
+                        st.warning(
+                            f"⚠️ **Tax Advisory — {ticker}**: {row['Shares']} shares purchased "
+                            f"{row['Purchase Date']} are **{dlt} days** from long-term treatment. "
+                            "Waiting before selling could significantly reduce your tax bill."
+                        )
+
+            # --- Fetch historical data ---
+            hist_data: Optional[pd.DataFrame] = None
+            try:
+                hist_data = yf.Ticker(ticker).history(period=HISTORICAL_DATA_PERIOD)
+            except Exception:
+                pass
+
+            if hist_data is not None and not hist_data.empty:
+                # --- Technical indicators ---
+                st.markdown("#### 📊 Technical Indicators")
+                rsi_val = calculate_rsi(hist_data)
+                sma20_val = sma(hist_data, period=20)
+                sma50_val = sma(hist_data, period=50)
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    rsi_str = f"{rsi_val:.1f}" if not pd.isna(rsi_val) else "N/A"
+                    rsi_state = (
+                        "Overbought (>70)" if not pd.isna(rsi_val) and rsi_val > 70
+                        else ("Oversold (<30)" if not pd.isna(rsi_val) and rsi_val < 30 else "Neutral")
+                    )
+                    st.metric("RSI (14)", rsi_str, delta=rsi_state)
+                with col2:
+                    st.metric("SMA-20", f"${sma20_val:.2f}" if not pd.isna(sma20_val) else "N/A")
+                with col3:
+                    st.metric("SMA-50", f"${sma50_val:.2f}" if not pd.isna(sma50_val) else "N/A")
+                with col4:
+                    if cp is not None and not pd.isna(sma20_val):
+                        pos_label = "Above SMA-20 ✅" if cp > sma20_val else "Below SMA-20 ⚠️"
+                        st.metric("Trend Position", pos_label)
+
+                # --- Chart ---
+                st.markdown("#### 📈 Price Chart & Analysis")
+                visualizer = StockVisualizer()
+                predictor = PricePredictor(forecast_days=DEFAULT_FORECAST_DAYS)
+                chart_price = cp if cp is not None else float(hist_data['Close'].iloc[-1])
+                prediction = predictor.predict_price_range(ticker, chart_price, hist_data)
+                chart_img = visualizer.create_full_analysis_chart(
+                    ticker, {}, prediction,
+                    {'support_resistance': {'support': 0, 'resistance': 0, 'relative_position': 0},
+                     'indicators': {}},
+                    hist_data
+                )
+                if chart_img:
+                    st.markdown(f'<img src="{chart_img}" style="width:100%"/>', unsafe_allow_html=True)
+                else:
+                    st.info("Chart requires matplotlib: `pip install matplotlib`")
+
+                # --- Entry/Exit technical levels ---
+                suggestion = suggest_entry_exit(hist_data)
+                if suggestion.get('entry') is not None:
+                    st.markdown("#### 📍 Technical Entry/Exit Levels")
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Entry Level", f"${suggestion['entry']:.2f}")
+                    with col2:
+                        st.metric("Stop Loss", f"${suggestion['stop']:.2f}")
+                    with col3:
+                        st.metric("Target 1", f"${suggestion['target1']:.2f}")
+                    with col4:
+                        st.metric("Target 2", f"${suggestion['target2']:.2f}")
+                    st.caption(
+                        f"Strategy: {suggestion['strategy']} | Confidence: {suggestion['confidence']}"
+                    )
+
+                # --- Buy/Sell Recommendations ---
+                st.markdown("#### 💡 Buy / Sell Recommendations")
+                if cp is not None:
+                    sell_signals = []
+                    buy_signals = []
+
+                    # RSI signals
+                    if not pd.isna(rsi_val):
+                        if rsi_val > 70:
+                            sell_signals.append(
+                                f"RSI overbought ({rsi_val:.1f} > 70) — momentum may be fading"
+                            )
+                        elif rsi_val < 30:
+                            buy_signals.append(
+                                f"RSI oversold ({rsi_val:.1f} < 30) — potential bounce opportunity"
+                            )
+
+                    # SMA signals
+                    if not pd.isna(sma20_val):
+                        if cp < sma20_val * 0.97:
+                            sell_signals.append(
+                                f"Price >3% below SMA-20 (${sma20_val:.2f}) — bearish signal"
+                            )
+                        elif cp > sma20_val:
+                            buy_signals.append(f"Price above SMA-20 (${sma20_val:.2f}) — uptrend intact")
+
+                    # P&L signals
+                    if pnl_pct_val is not None:
+                        if pnl_pct_val > 20:
+                            sell_signals.append(
+                                f"Position up {pnl_pct_val:.1f}% — consider taking profits"
+                            )
+                        if pnl_pct_val < -15:
+                            sell_signals.append(
+                                f"Position down {pnl_pct_val:.1f}% — consider cutting losses"
+                            )
+                            buy_signals.append(
+                                f"Position down {pnl_pct_val:.1f}% — averaging down could lower cost basis "
+                                "(only if you are confident in the stock's fundamentals)"
+                            )
+
+                    # Tax-aware sell signal
+                    for row in tax_rows:
+                        dlt = row['Days → Long-Term']
+                        if isinstance(dlt, int) and 0 < dlt <= 90:
+                            sell_signals.append(
+                                f"⚠️ Tax: {row['Shares']} shares are {dlt} days from long-term treatment — "
+                                "delay selling this lot to qualify for lower capital-gains rate"
+                            )
+
+                    # Technical strategy signals
+                    strategy = suggestion.get('strategy', '')
+                    if 'Breakout' in strategy:
+                        buy_signals.append(
+                            f"Technical breakout detected ({strategy}) — positive momentum"
+                        )
+                    elif 'Pullback' in strategy:
+                        buy_signals.append(
+                            f"Pullback entry opportunity ({strategy}) — consider adding on dips"
+                        )
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown("##### 🔴 Sell / Reduce Signals")
+                        if sell_signals:
+                            for sig in sell_signals:
+                                st.markdown(f"- {sig}")
+                        else:
+                            st.success("No sell signals at this time")
+                    with col2:
+                        st.markdown("##### 🟢 Buy / Average Down Signals")
+                        if buy_signals:
+                            for sig in buy_signals:
+                                st.markdown(f"- {sig}")
+                        else:
+                            st.info("No buy/add signals at this time")
+
+                    # Overall action box
+                    st.markdown("##### 📋 Overall Recommendation")
+                    tax_urgent = any(
+                        isinstance(r.get('Days → Long-Term'), int) and 0 < r['Days → Long-Term'] <= 30
+                        for r in tax_rows
+                    )
+                    n_sell = len(sell_signals)
+                    n_buy = len(buy_signals)
+
+                    if tax_urgent:
+                        st.warning(
+                            "🚨 **HOLD — Tax Priority**: One or more lots are within 30 days of qualifying "
+                            "for long-term capital gains. Wait before selling these lots to minimize taxes, "
+                            "unless a significant technical breakdown warrants immediate action."
+                        )
+                    elif n_sell > n_buy and pnl_pct_val is not None and pnl_pct_val > 0:
+                        any_st = any('Short-Term' in r['Tax Treatment'] for r in tax_rows)
+                        tax_note = "Check tax treatment before selling — some lots are short-term." if any_st else "Long-term rates apply."
+                        st.error(
+                            f"🔴 **CONSIDER SELLING**: Multiple sell signals with a {pnl_pct_val:.1f}% gain. "
+                            f"Consider selling all or part of your position. {tax_note}"
+                        )
+                    elif n_sell > n_buy and pnl_pct_val is not None and pnl_pct_val < -10:
+                        st.error(
+                            f"🔴 **CONSIDER EXITING**: Down {pnl_pct_val:.1f}% with bearish signals. "
+                            "Consider exiting completely to limit further losses."
+                        )
+                    elif n_buy > n_sell and pnl_pct_val is not None and pnl_pct_val < -5:
+                        st.warning(
+                            f"🟡 **CONSIDER AVERAGING DOWN**: Down {pnl_pct_val:.1f}% with positive technical "
+                            "signals. Averaging down can improve your cost basis but increases position risk — "
+                            "only do this with conviction in the stock's fundamentals."
+                        )
+                    elif n_buy > n_sell:
+                        msg = (
+                            "Consider adding to your position on dips."
+                            if pnl_pct_val is not None and pnl_pct_val < 10
+                            else "Hold and let winners run."
+                        )
+                        st.success(f"🟢 **HOLD / ADD**: Positive signals present. {msg}")
+                    else:
+                        pnl_str = f"{pnl_pct_val:+.1f}%" if pnl_pct_val is not None else "N/A"
+                        st.info(f"⚪ **HOLD**: Mixed or neutral signals. Monitor the position. Current P&L: {pnl_str}")
+                else:
+                    st.warning("Current price unavailable — cannot generate buy/sell recommendations.")
+            else:
+                st.warning(f"Unable to fetch historical data for **{ticker}**.")
+
+            # --- Remove lot buttons ---
+            st.markdown("#### 🗑️ Remove Lots")
+            lots_reset = lots.reset_index()
+            for _, lot_row in lots_reset.iterrows():
+                orig_idx = lot_row['index']
+                date_str = (
+                    lot_row['purchase_date'].strftime('%Y-%m-%d')
+                    if pd.notna(lot_row['purchase_date']) else 'Unknown date'
+                )
+                label = f"Remove: {lot_row['shares']:.3f} shares @ ${lot_row['avg_cost']:.2f} ({date_str})"
+                if st.button(label, key=f"remove_{ticker}_{orig_idx}"):
+                    holdings_df = holdings_df.drop(index=orig_idx).reset_index(drop=True)
+                    save_holdings(holdings_df)
+                    st.success(f"Removed lot from {ticker}")
+                    st.rerun()
+
+
 def render_backtest_tab():
     """
     Render the Backtesting tab for testing and refining screening criteria
@@ -1417,7 +1856,7 @@ def main():
     # ========================================================================
     auto_run_mode = st.checkbox(
         "🤖 Enable Auto-Run Mode",
-        value=True,
+        value=False,
         help="Automatically run through multiple screening scenarios without manual selection. "
              "This will test various combinations of data sources, universes, and price ranges.",
         key="auto_run_mode_checkbox"
@@ -1442,11 +1881,12 @@ def main():
             st.session_state['auto_run_executed'] = True
         
         # Create tabs for organized display
-        tab1, tab2, tab3, tab4 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "🏆 Top 5 Results",
             "📊 All Scenarios",
             "📈 Combined Visualization",
-            "📉 Backtesting"
+            "📉 Backtesting",
+            "📋 Watchlist"
         ])
         
         with tab1:
@@ -1460,6 +1900,9 @@ def main():
         
         with tab4:
             render_backtest_tab()
+        
+        with tab5:
+            render_watchlist_tab()
         
         st.markdown("---")
         st.info("💡 **Tip:** Uncheck 'Enable Auto-Run Mode' to return to manual screening mode. Click 'Refresh Scan' to update results.")
@@ -2237,6 +2680,10 @@ def main():
                     st.info("No log entries yet. Run the screener to see debug information.")
     else:
         st.info("👆 Click 'Run Screener' to fetch and filter stocks.")
+
+    # Watchlist section (always visible in manual mode)
+    st.markdown("---")
+    render_watchlist_tab()
 
 
 if __name__ == "__main__":
