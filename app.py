@@ -1837,6 +1837,41 @@ def render_backtest_tab():
                 f"Forward window: {forward_window} days"
             )
 
+            # ------------------------------------------------------------------ #
+            # Backtested forecast accuracy charts (one per symbol)
+            # ------------------------------------------------------------------ #
+            st.markdown("### 📈 Backtested Forecast Charts")
+            st.info(
+                "Each chart overlays historical forecast cones on the price history. "
+                "🟢 **Green** = the actual price landed inside the predicted 80% confidence band (hit). "
+                "🔴 **Red** = the price fell outside the band (miss). "
+                "🟣 **Purple** = the current forward-looking forecast."
+            )
+            bt_visualizer = StockVisualizer()
+            for result_row in success_rows:
+                bt_symbol = result_row['Symbol']
+                with st.expander(f"📊 {bt_symbol} — Forecast History", expanded=False):
+                    try:
+                        bt_ticker = yf.Ticker(bt_symbol)
+                        bt_hist = bt_ticker.history(period=f"{total_days_needed}d")
+                        if not bt_hist.empty and len(bt_hist) >= forward_window * 3 + 20:
+                            bt_chart = bt_visualizer.create_backtested_forecast_chart(
+                                bt_symbol, bt_hist, forecast_days=forward_window,
+                                # +1 reserves one extra window for look-ahead validation
+                                num_past_forecasts=min(5, len(bt_hist) // (forward_window + 1))
+                            )
+                            if bt_chart:
+                                st.markdown(
+                                    f'<img src="{bt_chart}" style="width:100%"/>',
+                                    unsafe_allow_html=True
+                                )
+                            else:
+                                st.info("Not enough historical data to render forecast chart.")
+                        else:
+                            st.info("Not enough historical data to render forecast chart.")
+                    except Exception as bt_err:
+                        st.warning(f"Could not render chart for {bt_symbol}: {bt_err}")
+
         if failed_rows:
             with st.expander(f"⚠️ {len(failed_rows)} symbol(s) with issues", expanded=False):
                 for r in failed_rows:
