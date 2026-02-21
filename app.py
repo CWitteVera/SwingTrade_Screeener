@@ -1891,7 +1891,7 @@ def main():
     # ========================================================================
     auto_run_mode = st.checkbox(
         "🤖 Enable Auto-Run Mode",
-        value=False,
+        value=True,
         help="Automatically run through multiple screening scenarios without manual selection. "
              "This will test various combinations of data sources, universes, and price ranges.",
         key="auto_run_mode_checkbox"
@@ -2716,9 +2716,13 @@ def main():
     else:
         st.info("👆 Click 'Run Screener' to fetch and filter stocks.")
 
-    # Watchlist section (always visible in manual mode)
+    # Additional tabs always visible in manual mode
     st.markdown("---")
-    render_watchlist_tab()
+    tab_backtest, tab_watchlist = st.tabs(["📉 Backtesting", "📋 Watchlist"])
+    with tab_backtest:
+        render_backtest_tab()
+    with tab_watchlist:
+        render_watchlist_tab()
 
 
 if __name__ == "__main__":
